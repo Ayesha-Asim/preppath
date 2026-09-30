@@ -44,12 +44,20 @@ const suggestions = [
 
 function normalizeMathMarkdown(content: string) {
   return content
-    // Convert \[ ... \] into Markdown display math
+    // Convert escaped display-math dollars:
+    // \$\$ ... \$\$  ->  $$ ... $$
+    .replace(/\\\$\\\$/g, "$$")
+
+    // Convert escaped inline-math dollars:
+    // \$ ... \$  ->  $ ... $
+    .replace(/\\\$/g, "$")
+
+    // Convert \[ ... \] to display math
     .replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => {
       return `\n\n$$${math.trim()}$$\n\n`;
     })
 
-    // Convert \( ... \) into Markdown inline math
+    // Convert \( ... \) to inline math
     .replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => {
       return `$${math.trim()}$`;
     });
