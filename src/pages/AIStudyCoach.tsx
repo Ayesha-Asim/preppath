@@ -9,6 +9,9 @@ import {
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 
 import {
   ArrowRight,
@@ -39,6 +42,19 @@ const suggestions = [
   "Explain a difficult concept in simple words",
 ];
 
+function normalizeMathMarkdown(content: string) {
+  return content
+    // Convert \[ ... \] into Markdown display math
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => {
+      return `\n\n$$${math.trim()}$$\n\n`;
+    })
+
+    // Convert \( ... \) into Markdown inline math
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => {
+      return `$${math.trim()}$`;
+    });
+}
+
 function MessageText({
   content,
   role,
@@ -51,10 +67,14 @@ function MessageText({
     );
   }
 
+  const normalizedContent =
+    normalizeMathMarkdown(content);
+
   return (
     <div className="coach-message-text coach-markdown">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
         components={{
           table: ({ children }) => (
             <div className="coach-table-wrap">
@@ -63,7 +83,7 @@ function MessageText({
           ),
         }}
       >
-        {content}
+        {normalizedContent}
       </ReactMarkdown>
     </div>
   );
