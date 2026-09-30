@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { CSSProperties } from "react";
 
@@ -7,6 +7,11 @@ import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { supabase } from "../lib/supabase";
 import { getQuestions } from "../lib/questions";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";  
 
 import {
   isBookmarked,
@@ -80,77 +85,23 @@ function normalizeCorrectAnswer(
  * Renders AI explanations with real LaTeX support via MathJax.
  * This keeps the fix inside TestRunner.tsx and avoids adding a package.
  */
-declare global {
-  interface Window {
-    MathJax?: {
-      typesetPromise?: (elements?: HTMLElement[]) => Promise<void>;
-      typesetClear?: (elements?: HTMLElement[]) => void;
-      startup?: {
-        promise?: Promise<void>;
-      };
-    };
-  }
-}
+function normalizeMathMarkdown(content: string) {
+  return content
+    // \$\$ ... \$\$ -> $$ ... $$
+    .replace(/\\\$\\\$/g, "$$")
 
-let mathJaxLoadingPromise: Promise<void> | null = null;
+    // \$ ... \$ -> $ ... $
+    .replace(/\\\$/g, "$")
 
-function loadMathJax(): Promise<void> {
-  if (window.MathJax?.typesetPromise) {
-    return Promise.resolve();
-  }
+    // \[ ... \] -> display math
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => {
+      return `\n\n$$${math.trim()}$$\n\n`;
+    })
 
-  if (mathJaxLoadingPromise) {
-    return mathJaxLoadingPromise;
-  }
-
-  mathJaxLoadingPromise = new Promise((resolve, reject) => {
-    const existing = document.getElementById("preppath-mathjax");
-
-    if (existing) {
-      const waitForMathJax = () => {
-        if (window.MathJax?.typesetPromise) {
-          resolve();
-        } else {
-          window.setTimeout(waitForMathJax, 50);
-        }
-      };
-
-      waitForMathJax();
-      return;
-    }
-
-    // Configure MathJax before loading the library.
-    window.MathJax = {
-      tex: {
-        inlineMath: [
-          ["\\(", "\\)"],
-          ["$", "$"],
-        ],
-        displayMath: [
-          ["\\[", "\\]"],
-          ["$$", "$$"],
-        ],
-        processEscapes: true,
-      },
-      svg: {
-        fontCache: "global",
-      },
-    } as any;
-
-    const script = document.createElement("script");
-    script.id = "preppath-mathjax";
-    script.src =
-      "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js";
-    script.async = true;
-
-    script.onload = () => resolve();
-    script.onerror = () =>
-      reject(new Error("MathJax failed to load"));
-
-    document.head.appendChild(script);
-  });
-
-  return mathJaxLoadingPromise;
+    // \( ... \) -> inline math
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => {
+      return `$${math.trim()}$`;
+    });
 }
 
 function MathExplanation({
@@ -160,46 +111,35 @@ function MathExplanation({
   text: string;
   color: string;
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function renderMath() {
-      try {
-        await loadMathJax();
-
-        if (cancelled || !containerRef.current) {
-          return;
-        }
-
-        window.MathJax?.typesetClear?.([containerRef.current]);
-        await window.MathJax?.typesetPromise?.([
-          containerRef.current,
-        ]);
-      } catch (error) {
-        console.error("Math rendering failed:", error);
-      }
-    }
-
-    renderMath();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [text]);
+  const normalizedContent =
+    normalizeMathMarkdown(text);
 
   return (
     <div
-      ref={containerRef}
       style={{
         color,
         lineHeight: 1.8,
-        whiteSpace: "pre-wrap",
         fontSize: 15,
       }}
     >
-      {text}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={{
+          table: ({ children }) => (
+            <div
+              style={{
+                overflowX: "auto",
+                margin: "12px 0",
+              }}
+            >
+              <table>{children}</table>
+            </div>
+          ),
+        }}
+      >
+        {normalizedContent}
+      </ReactMarkdown>
     </div>
   );
 }
