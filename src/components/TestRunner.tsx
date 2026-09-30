@@ -111,6 +111,7 @@ function MathExplanation({
   text: string;
   color: string;
 }) {
+  console.log("RAW AI EXPLANATION:", JSON.stringify(text));
   const normalizedContent =
     normalizeMathMarkdown(text);
 
