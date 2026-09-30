@@ -674,73 +674,237 @@ export default function TestRunner({
   ======================================================= */
 
   async function getAIExplanation() {
-  if (
-    !current ||
-    selected === null
-  ) {
+  if (!current || selected === null) {
     return;
   }
 
   setLoadingAIExplanation(true);
   setAiExplanation("");
 
-    try {
-      const selectedAnswer =
-        current.options[selected];
+  try {
+    const selectedAnswer =
+      current.options[selected];
 
-      const correctAnswer =
-        current.options[current.answer];
+    const correctAnswer =
+      current.options[current.answer];
 
-      const {
-        data,
-        error,
-      } = await supabase.functions.invoke(
-        "ai-answer-explanation",
-        {
-          body: {
-            subject,
-            question:
-              current.question,
-            options:
-              current.options,
-            selectedAnswer,
-            correctAnswer,
-            existingExplanation:
-              current.explanation,
-          },
-        }
+    // Get the current authenticated session.
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setAiExplanation(
+        "Please sign in again to use AI explanations."
+      );
+      return;
+    }
+
+    const supabaseUrl =
+      import.meta.env.VITE_SUPABASE_URL;
+
+    const supabaseAnonKey =
+      import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error(
+        "Missing Supabase environment variables."
       );
 
-      if (error) {
-        console.error(
-          "AI explanation error:",
-          error
-        );
+      setAiExplanation(
+        "AI explanations are temporarily unavailable."
+      );
+      return;
+    }
 
-        setAiExplanation(
-          "Something went wrong while generating the AI explanation."
-        );
+    const response = await fetch(
+      `${supabaseUrl}/functions/v1/ai-answer-explanation`,
+      {
+        method: "POST",
 
-        return;
+        headers: {
+          Authorization:
+            `Bearer ${session.access_token}`,
+
+          apikey: supabaseAnonKey,
+
+          "Content-Type":
+            "application/json",
+        },
+
+        body: JSON.stringify({
+          subject,
+          question: current.question,
+          options: current.options,
+          selectedAnswer,
+          correctAnswer,
+          existingExplanation:
+            current.explanation,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      let message =
+        "Something went wrong while generating the AI explanation.";
+
+      try {
+        const errorData =
+          await response.json();
+
+        if (
+          typeof errorData?.error === "string"
+        ) {
+          message = errorData.error;
+        }
+      } catch {
+        // Keep the fallback message.
       }
 
-      setAiExplanation(
-        data?.explanation ||
-          "No explanation was generated."
-      );
-    } catch (error) {
-      console.error(
-        "AI explanation error:",
-        error
-      );
-
-      setAiExplanation(
-        "Something went wrong while generating the AI explanation."
-      );
-    } finally {
-      setLoadingAIExplanation(false);
+      throw new Error(message);
     }
+
+    if (!response.body) {
+      throw new Error(
+        "The AI explanation stream was unavailable."
+      );
+    }
+
+    const reader =
+      response.body.getReader();
+
+    const decoder =
+      new TextDecoder();
+
+    let buffer = "";
+    let fullExplanation = "";
+
+    while (true) {
+      const {
+        value,
+        done,
+      } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, {
+        stream: true,
+      });
+
+      /*
+       * OpenRouter sends Server-Sent Events.
+       * Each event normally looks like:
+       *
+       * data: {"choices":[{"delta":{"content":"text"}}]}
+       */
+      const lines = buffer.split("\n");
+
+      // Keep the last potentially incomplete line
+      // for the next network chunk.
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+
+        if (
+          !trimmed ||
+          !trimmed.startsWith("data:")
+        ) {
+          continue;
+        }
+
+        const payload =
+          trimmed.slice(5).trim();
+
+        if (payload === "[DONE]") {
+          continue;
+        }
+
+        try {
+          const data = JSON.parse(payload);
+
+          const content =
+            data?.choices?.[0]?.delta?.content;
+
+          if (
+            typeof content === "string" &&
+            content
+          ) {
+            fullExplanation += content;
+
+            // Update React immediately as
+            // each piece of text arrives.
+            setAiExplanation(
+              fullExplanation
+            );
+          }
+        } catch {
+          /*
+           * Ignore malformed/non-content SSE
+           * events rather than breaking the stream.
+           */
+        }
+      }
+    }
+
+    // Process a final buffered SSE line,
+    // if the stream ended without a newline.
+    const finalLine = buffer.trim();
+
+    if (
+      finalLine.startsWith("data:")
+    ) {
+      const payload =
+        finalLine.slice(5).trim();
+
+      if (
+        payload &&
+        payload !== "[DONE]"
+      ) {
+        try {
+          const data = JSON.parse(payload);
+
+          const content =
+            data?.choices?.[0]?.delta?.content;
+
+          if (
+            typeof content === "string" &&
+            content
+          ) {
+            fullExplanation += content;
+
+            setAiExplanation(
+              fullExplanation
+            );
+          }
+        } catch {
+          // Ignore an incomplete final event.
+        }
+      }
+    }
+
+    if (!fullExplanation.trim()) {
+      setAiExplanation(
+        "No explanation was generated."
+      );
+    }
+  } catch (error) {
+    console.error(
+      "AI explanation error:",
+      error
+    );
+
+    setAiExplanation(
+      error instanceof Error
+        ? error.message
+        : "Something went wrong while generating the AI explanation."
+    );
+  } finally {
+    setLoadingAIExplanation(false);
   }
+}
 
   /* =======================================================
      Submit answer
