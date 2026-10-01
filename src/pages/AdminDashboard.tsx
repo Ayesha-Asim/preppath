@@ -4,11 +4,27 @@ import AddQuestion from "../components/AddQuestion";
 import Loading from "../components/common/Loading";
 import { supabase } from "../lib/supabase";
 import ManageQuestions from "../components/ManageQuestions";
+import AdminChatInbox from "../components/AdminChatInbox";
 
 type AdminStats = {
   users: number;
   tests: number;
   questions: number;
+};
+
+type StudyResourceStatus = "pending" | "approved" | "rejected";
+
+type StudyResource = {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  subject: string;
+  resource_url: string;
+  resource_type: "pdf" | "image" | "drive" | "youtube";
+  status: StudyResourceStatus;
+  created_at: string;
+  reviewed_at: string | null;
 };
 
 const statCards = [
@@ -33,6 +49,14 @@ const statCards = [
 ];
 
 export default function AdminDashboard() {
+
+  const [resources, setResources] = useState<StudyResource[]>([]);
+  const [resourcesLoading, setResourcesLoading] = useState(true);
+  const [resourcesError, setResourcesError] = useState("");
+  const [openingResourceId, setOpeningResourceId] = useState<string | null>(null);
+  const [reviewingResourceId, setReviewingResourceId] = useState<string | null>(null);
+  const [resourceFilter, setResourceFilter] =
+  useState<"all" | StudyResourceStatus>("pending");
   const [stats, setStats] = useState<AdminStats>({
     users: 0,
     tests: 0,
@@ -43,6 +67,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     loadStats();
+    loadResources();
   }, []);
 
   async function loadStats() {
@@ -104,6 +129,164 @@ export default function AdminDashboard() {
 
     setLoading(false);
   }
+
+  async function loadResources() {
+    setResourcesLoading(true);
+    setResourcesError("");
+
+    const { data, error } = await supabase
+      .from("study_resources")
+      .select(
+        "id,user_id,title,description,subject,resource_type,resource_url,status,created_at,reviewed_at"
+      )
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Failed to load study resources:", error);
+      setResourcesError(
+        "Could not load study resources. Check your admin access and try again."
+      );
+    } else {
+      setResources((data ?? []) as StudyResource[]);
+    }
+
+    setResourcesLoading(false);
+  }
+
+  async function openSubmittedResource(resource: StudyResource) {
+    if (openingResourceId !== null) return;
+
+    setResourcesError("");
+    setOpeningResourceId(resource.id);
+
+    try {
+      if (
+        resource.resource_type === "drive" ||
+        resource.resource_type === "youtube"
+      ) {
+        const url = new URL(resource.resource_url);
+        const host = url.hostname.toLowerCase();
+
+        const allowed =
+          resource.resource_type === "drive"
+            ? ["drive.google.com", "docs.google.com"].includes(host)
+            : [
+                "youtube.com",
+                "www.youtube.com",
+                "m.youtube.com",
+                "youtu.be",
+              ].includes(host);
+
+        if (url.protocol !== "https:" || !allowed) {
+          throw new Error("Invalid resource link.");
+        }
+
+        window.open(url.href, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      if (
+        resource.resource_type !== "pdf" &&
+        resource.resource_type !== "image"
+      ) {
+        throw new Error("Unsupported resource type.");
+      }
+
+      const { data, error } = await supabase.storage
+        .from("study-resources")
+        .download(resource.resource_url);
+
+      if (error || !data) {
+        throw error ?? new Error("File not found.");
+      }
+
+      const blob = new Blob([data], {
+        type:
+          resource.resource_type === "pdf"
+            ? "application/pdf"
+            : data.type === "image/png"
+              ? "image/png"
+              : "image/jpeg",
+      });
+
+      const objectUrl = URL.createObjectURL(blob);
+      const preview = window.open(objectUrl, "_blank");
+
+      if (!preview) {
+        const anchor = document.createElement("a");
+        anchor.href = objectUrl;
+        anchor.download = `${
+          resource.title
+            .replace(/[^a-z0-9 _-]/gi, "")
+            .slice(0, 80) || "resource"
+        }.${
+          resource.resource_type === "pdf"
+            ? "pdf"
+            : blob.type === "image/png"
+              ? "png"
+              : "jpg"
+        }`;
+
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      }
+
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (caught) {
+      setResourcesError(
+        caught instanceof Error
+          ? caught.message
+          : "Unable to open submitted resource."
+      );
+    } finally {
+      setOpeningResourceId(null);
+    }
+  }
+
+async function reviewResource(
+  resource: StudyResource,
+  decision: "approved" | "rejected"
+) {
+  const confirmed = window.confirm(
+    `Are you sure you want to ${
+      decision === "approved" ? "approve" : "reject"
+    } “${resource.title}”?`
+  );
+
+  if (!confirmed) return;
+
+  setReviewingResourceId(resource.id);
+  setResourcesError("");
+
+  const { error } = await supabase.rpc("review_study_resource", {
+    resource_id: resource.id,
+    decision,
+  });
+
+  if (error) {
+    console.error("Failed to review study resource:", error);
+    setResourcesError(
+      error.message || "Could not review this resource."
+    );
+  } else {
+    await loadResources();
+  }
+
+  setReviewingResourceId(null);
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "—";
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
 
   return (
     <MainLayout>
@@ -476,6 +659,173 @@ export default function AdminDashboard() {
             </div>
           )}
         </section>
+
+        {/* Student messages */}
+
+          <AdminChatInbox />
+
+        {/* Study resource moderation */}
+
+<section className="mb-9">
+  <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <h2 className="text-2xl font-extrabold">Study Resource Review</h2>
+
+      <p className="mt-1 text-sm text-[#6E6476] dark:text-[#C8BCD3]">
+        Review student-submitted resources before they appear in the shared
+        library.
+      </p>
+    </div>
+
+    <button
+      type="button"
+      onClick={loadResources}
+      disabled={resourcesLoading || reviewingResourceId !== null}
+      className="rounded-xl border border-[#E4DDED] bg-white px-4 py-2 text-sm font-bold text-[#4C1D95] disabled:opacity-50 dark:border-violet-500/20 dark:bg-[#17101F] dark:text-[#C4B5FD]"
+    >
+      Refresh Resources
+    </button>
+  </div>
+
+  <div className="overflow-hidden rounded-[26px] border border-[#E4DDED] bg-white dark:border-violet-500/20 dark:bg-[#17101F]">
+
+    {/* Filters */}
+    <div className="flex flex-wrap gap-2 border-b border-[#E4DDED] bg-[#FAF8FE] p-4 dark:border-violet-500/20 dark:bg-[#21152D]">
+      {(["pending", "approved", "rejected", "all"] as const).map(
+        (filter) => (
+          <button
+            key={filter}
+            type="button"
+            onClick={() => setResourceFilter(filter)}
+            className={`rounded-xl px-3 py-2 text-xs font-extrabold capitalize ${
+              resourceFilter === filter
+                ? "bg-[#7C3AED] text-white"
+                : "border border-[#E4DDED] bg-white text-[#6E6476] dark:border-violet-500/20 dark:bg-[#17101F] dark:text-[#C8BCD3]"
+            }`}
+          >
+            {filter}
+            {filter === "pending"
+              ? ` (${
+                  resources.filter(
+                    (resource) => resource.status === "pending"
+                  ).length
+                })`
+              : ""}
+          </button>
+        )
+      )}
+    </div>
+
+    {/* Error */}
+    {resourcesError && (
+      <p
+        role="alert"
+        className="p-4 text-sm text-red-600 dark:text-red-300"
+      >
+        {resourcesError}
+      </p>
+    )}
+
+    {/* Resources */}
+    {resourcesLoading ? (
+      <Loading />
+    ) : (
+      <div className="divide-y divide-[#E4DDED] dark:divide-violet-500/20">
+        {resources.filter(
+          (resource) =>
+            resourceFilter === "all" ||
+            resource.status === resourceFilter
+        ).length === 0 ? (
+          <p className="p-8 text-center text-sm text-[#6E6476] dark:text-[#C8BCD3]">
+            No resources in this category.
+          </p>
+        ) : (
+          resources
+            .filter(
+              (resource) =>
+                resourceFilter === "all" ||
+                resource.status === resourceFilter
+            )
+            .map((resource) => (
+              <article
+                key={resource.id}
+                className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="mb-1 flex flex-wrap items-center gap-2">
+                    <h3 className="break-words text-base font-extrabold">
+                      {resource.title}
+                    </h3>
+
+                    <span className="rounded-full bg-[#F0E9FF] px-2 py-1 text-xs font-bold capitalize text-[#6D28D9] dark:bg-violet-500/20 dark:text-[#C4B5FD]">
+                      {resource.status}
+                    </span>
+                  </div>
+
+                  <p className="text-sm font-semibold text-[#6D28D9] dark:text-[#C4B5FD]">
+                    {resource.subject}
+                  </p>
+
+                  {resource.description && (
+                    <p className="mt-2 whitespace-pre-wrap break-words text-sm text-[#6E6476] dark:text-[#C8BCD3]">
+                      {resource.description}
+                    </p>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => void openSubmittedResource(resource)}
+                    disabled={openingResourceId !== null}
+                    className="mt-2 inline-block break-all text-left text-sm font-semibold text-[#6D28D9] underline disabled:opacity-50 dark:text-[#C4B5FD]"
+                  >
+                    {openingResourceId === resource.id
+                      ? "Opening resource..."
+                      : "Open submitted resource ↗"}
+                  </button>
+
+                  <p className="mt-2 text-xs text-[#6E6476] dark:text-[#C8BCD3]">
+                    Submitted {formatDate(resource.created_at)}
+                    {resource.reviewed_at
+                      ? ` • Reviewed ${formatDate(resource.reviewed_at)}`
+                      : ""}
+                  </p>
+                </div>
+
+                {/* Only pending resources can be reviewed */}
+                {resource.status === "pending" && (
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      type="button"
+                      disabled={reviewingResourceId !== null}
+                      onClick={() =>
+                        void reviewResource(resource, "rejected")
+                      }
+                      className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-extrabold text-red-700 disabled:opacity-50 dark:border-red-500/25 dark:bg-red-500/10 dark:text-red-300"
+                    >
+                      Reject
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={reviewingResourceId !== null}
+                      onClick={() =>
+                        void reviewResource(resource, "approved")
+                      }
+                      className="rounded-xl bg-gradient-to-r from-[#7C3AED] to-[#4C1D95] px-4 py-2 text-sm font-extrabold text-white disabled:opacity-50"
+                    >
+                      {reviewingResourceId === resource.id
+                        ? "Working..."
+                        : "Approve"}
+                    </button>
+                  </div>
+                )}
+              </article>
+            ))
+        )}
+      </div>
+    )}
+  </div>
+</section>
 
         {/* Question management */}
 
