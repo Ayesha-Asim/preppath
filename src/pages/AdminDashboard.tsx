@@ -3,6 +3,7 @@ import MainLayout from "../components/MainLayout";
 import AddQuestion from "../components/AddQuestion";
 import Loading from "../components/common/Loading";
 import { supabase } from "../lib/supabase";
+import ManageQuestions from "../components/ManageQuestions";
 
 type AdminStats = {
   users: number;
@@ -505,6 +506,7 @@ export default function AdminDashboard() {
           </div>
 
           <AddQuestion />
+        <ManageQuestions />
         </section>
       </div>
     </MainLayout>
