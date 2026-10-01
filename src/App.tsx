@@ -33,7 +33,6 @@ import Bookmarks from "./pages/Bookmarks";
 
 /* Admin pages */
 import AdminDashboard from "./pages/AdminDashboard";
-import ImportQuestions from "./pages/ImportQuestions";
 
 /* Test pages */
 import EnglishTest from "./pages/tests/EnglishTest";
@@ -286,16 +285,6 @@ export default function App() {
           }
         />
 
-        <Route
-          path="/import-questions"
-          element={
-            <ProtectedRoute>
-              <AdminRoute>
-                <ImportQuestions />
-              </AdminRoute>
-            </ProtectedRoute>
-          }
-        />
 
         {/* =========================
             CONTACT ROUTE

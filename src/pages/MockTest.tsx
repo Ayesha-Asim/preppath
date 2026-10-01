@@ -1,16 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import MainLayout from "../components/MainLayout";
+import { supabase } from "../lib/supabase";
 import { useTheme } from "../context/ThemeContext";
-
-import { Questions as englishQuestions } from "../data/tests/English";
-import { Questions as advancedMathQuestions } from "../data/tests/AdvancedMathematics";
-import { Questions as analyticalReasoningQuestions } from "../data/tests/AnalyticalReasoning";
-import { Questions as basicMathQuestions } from "../data/tests/BasicMathematics";
-import { Questions as computerScienceQuestions } from "../data/tests/ComputerScience";
-import { Questions as iqQuestions } from "../data/tests/IQ";
-import { Questions as physicsQuestions } from "../data/tests/Physics";
-import { Questions as quantitativeReasoningQuestions } from "../data/tests/QuantitativeReasoning";
 
 import { canStartQuiz } from "../utils/quizLimit";
 import { BookOpen, BrainCircuit, Calculator, ChartNoAxesCombined, Laptop, Search, Sigma, Atom, FileText, Timer, GraduationCap, ChevronRight, CalendarDays, Trophy, Zap, BarChart3 } from "lucide-react";
@@ -31,7 +23,7 @@ const subjects: SubjectCard[] = [
     title: "Advanced Mathematics",
     icon: Sigma,
     desc: "Higher difficulty math questions",
-    questions: advancedMathQuestions.length,
+    questions: 0,
     difficulty: "Hard",
     path: "/test/advanced-mathematics",
   },
@@ -39,7 +31,7 @@ const subjects: SubjectCard[] = [
     title: "Basic Mathematics",
     icon: Calculator,
     desc: "Basic calculations and formulas",
-    questions: basicMathQuestions.length,
+    questions: 0,
     difficulty: "Medium",
     path: "/test/basic-mathematics",
   },
@@ -47,7 +39,7 @@ const subjects: SubjectCard[] = [
     title: "IQ",
     icon: BrainCircuit,
     desc: "Patterns, series, and logic",
-    questions: iqQuestions.length,
+    questions: 0,
     difficulty: "Medium",
     path: "/test/iq",
   },
@@ -55,7 +47,7 @@ const subjects: SubjectCard[] = [
     title: "Analytical Reasoning",
     icon: Search,
     desc: "Logic and reasoning practice",
-    questions: analyticalReasoningQuestions.length,
+    questions: 0,
     difficulty: "Medium",
     path: "/test/analytical-reasoning",
   },
@@ -63,7 +55,7 @@ const subjects: SubjectCard[] = [
     title: "Quantitative Reasoning",
     icon: ChartNoAxesCombined,
     desc: "Numbers, ratios, and data questions",
-    questions: quantitativeReasoningQuestions.length,
+    questions: 0,
     difficulty: "Medium",
     path: "/test/quantitative-reasoning",
   },
@@ -71,7 +63,7 @@ const subjects: SubjectCard[] = [
     title: "Computer Science",
     icon: Laptop,
     desc: "Computer basics and CS concepts",
-    questions: computerScienceQuestions.length,
+    questions: 0,
     difficulty: "Easy",
     path: "/test/computer-science",
   },
@@ -79,7 +71,7 @@ const subjects: SubjectCard[] = [
     title: "Physics",
     icon: Atom,
     desc: "Conceptual and numerical physics",
-    questions: physicsQuestions.length,
+    questions: 0,
     difficulty: "Hard",
     path: "/test/physics",
   },
@@ -87,7 +79,7 @@ const subjects: SubjectCard[] = [
     title: "English",
     icon: BookOpen,
     desc: "Vocabulary, grammar, and comprehension",
-    questions: englishQuestions.length,
+    questions: 0,
     difficulty: "Easy",
     path: "/test/english",
   },
@@ -167,6 +159,46 @@ export default function MockTest() {
   const navigate = useNavigate();
   const { theme } = useTheme();
   const isDark = theme === "dark";
+
+  const [questionCounts, setQuestionCounts] = useState<Record<string, number>>({});
+
+ useEffect(() => {
+  let cancelled = false;
+
+  async function loadQuestionCounts() {
+    try {
+      const counts: Record<string, number> = {};
+
+      for (const subject of subjects) {
+        const { count, error } = await supabase
+          .from("questions")
+          .select("*", {
+            count: "exact",
+            head: true,
+          })
+          .eq("subject", subject.title);
+
+        if (error) {
+          throw error;
+        }
+
+        counts[subject.title] = count ?? 0;
+      }
+
+      if (!cancelled) {
+        setQuestionCounts(counts);
+      }
+    } catch (error) {
+      console.error("Error loading question counts:", error);
+    }
+  }
+
+  loadQuestionCounts();
+
+  return () => {
+    cancelled = true;
+  };
+}, []);
 
   const [search, setSearch] = useState("");
   const [selectedUniversity, setSelectedUniversity] = useState("All");
@@ -269,7 +301,7 @@ export default function MockTest() {
             </div>
             <div className="mt-subrow"><div className="mt-categories">{categories.map(cat => <button key={cat} className={category===cat?'mt-active':''} onClick={() => setCategory(cat)}>{cat}</button>)}</div><div className="mt-difficulties"><span className="mt-easy">Easy: {difficultyCounts.Easy}</span><span className="mt-medium">Medium: {difficultyCounts.Medium}</span><span className="mt-hard">Hard: {difficultyCounts.Hard}</span></div></div>
             {visibleSubjects.length===0 ? <div className="mt-empty"><Search size={27}/><h3>No subjects found</h3><p>Try another search or change your filters.</p><button onClick={() => {setSearch('');setSelectedUniversity('All');setCategory('All Subjects');}}>Reset Filters</button></div> :
-              <div className="mt-grid">{visibleSubjects.map(subject => {const SubjectIcon=subject.icon;return <button className="mt-subject" key={subject.path} onClick={() => startSubject(subject)}><span className="mt-subject-icon"><SubjectIcon size={31} strokeWidth={1.8}/></span><span className="mt-subject-body"><strong>{subject.title}</strong><span className="mt-subject-meta"><span className={`mt-difficulty mt-${subject.difficulty.toLowerCase()}`}>{subject.difficulty}</span><span className="mt-question"><FileText size={15}/>{subject.questions} Questions</span></span><small>{subject.desc}</small></span><span className="mt-chevron"><ChevronRight size={19}/></span></button>})}</div>}
+              <div className="mt-grid">{visibleSubjects.map(subject => {const SubjectIcon=subject.icon;return <button className="mt-subject" key={subject.path} onClick={() => startSubject(subject)}><span className="mt-subject-icon"><SubjectIcon size={31} strokeWidth={1.8}/></span><span className="mt-subject-body"><strong>{subject.title}</strong><span className="mt-subject-meta"><span className={`mt-difficulty mt-${subject.difficulty.toLowerCase()}`}>{subject.difficulty}</span><span className="mt-question"><FileText size={15}/>{questionCounts[subject.title] ?? 0} Questions</span></span><small>{subject.desc}</small></span><span className="mt-chevron"><ChevronRight size={19}/></span></button>})}</div>}
             <div className="mt-daily"><div className="mt-daily-left"><span className="mt-calendar"><CalendarDays size={24}/></span><div><strong>Unlimited Practice</strong><p>All test modes are available to every student.</p></div></div></div>
           </section>
         </div>
