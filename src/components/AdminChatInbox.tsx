@@ -36,11 +36,6 @@ export default function AdminChatInbox() {
         .select("id,name,display_name,email")
         .in("id", rows.map(row => row.student_id));
 
-      console.log("Admin chat profile lookup:", {
-        profiles,
-        profileError,
-        conversationCount: rows.length,
-      });
       if (active && !profileError && profiles) setStudentNames(Object.fromEntries(profiles.map(profile =>
         [profile.id, profile.name?.trim() || profile.email || "Student"])));
       // Get each conversation's latest message to identify unread student messages.
