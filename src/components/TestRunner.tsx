@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { supabase } from "../lib/supabase";
 import { getQuestions } from "../lib/questions";
+import { notifyNewAchievements } from "../lib/achievements";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -144,6 +145,63 @@ function MathExplanation({
   );
 }
 
+type SavedTestAttempt = {
+  subject: string;
+  mode: string;
+  questionIds: string[];
+  index: number;
+  selected: number | null;
+  score: number;
+  userAnswers: (number | null)[];
+  timeLeft: number;
+  savedAt: string;
+};
+
+function getTestDraftKey(subject: string, mode: string) {
+  return `preppath-test-draft:${subject}:${mode}`;
+}
+
+function loadTestDraft(
+  subject: string,
+  mode: string
+): SavedTestAttempt | null {
+  try {
+    const raw = window.localStorage.getItem(
+      getTestDraftKey(subject, mode)
+    );
+
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as SavedTestAttempt;
+
+    if (
+      parsed.subject !== subject ||
+      parsed.mode !== mode ||
+      !Array.isArray(parsed.questionIds) ||
+      !Array.isArray(parsed.userAnswers)
+    ) {
+      return null;
+    }
+
+    return parsed;
+  } catch (error) {
+    console.error("Could not restore saved test:", error);
+    return null;
+  }
+}
+
+function clearTestDraft(subject: string, mode: string) {
+  try {
+    window.localStorage.removeItem(
+      getTestDraftKey(subject, mode)
+    );
+  } catch (error) {
+    console.error("Could not clear saved test:", error);
+  }
+}
+
 /* =========================================================
    Component
 ========================================================= */
@@ -161,6 +219,11 @@ export default function TestRunner({
 
   const mode = searchParams.get("mode") || "20-questions";
   const normalizedMode = mode.toLowerCase().trim();
+
+  const savedDraft = useMemo(
+    () => loadTestDraft(subject, normalizedMode),
+    [subject, normalizedMode]
+  );
 
   const isTimedMode =
     normalizedMode === "timed-mode" ||
@@ -228,18 +291,24 @@ export default function TestRunner({
   const [dbQuestions, setDbQuestions] =
     useState<Question[]>([]);
 
-  const [index, setIndex] = useState(0);
+  const [index, setIndex] = useState(
+    savedDraft?.index ?? 0
+  );
 
   const [selected, setSelected] =
-    useState<number | null>(null);
+    useState<number | null>(
+      savedDraft?.selected ?? null
+    );
 
-  const [score, setScore] = useState(0);
+  const [score, setScore] = useState(
+    savedDraft?.score ?? 0
+  );
 
   const [finished, setFinished] = useState(false);
 
   const [userAnswers, setUserAnswers] = useState<
     (number | null)[]
-  >([]);
+  >(savedDraft?.userAnswers ?? []);
 
   const [bookmarked, setBookmarked] =
     useState(false);
@@ -258,7 +327,17 @@ export default function TestRunner({
   ] = useState(false);
 
   const [timeLeft, setTimeLeft] =
-    useState(initialTime);
+    useState(
+      isTimedMode && savedDraft
+        ? savedDraft.timeLeft
+        : initialTime
+    );
+
+  const [resultSaveError, setResultSaveError] =
+    useState("");
+
+  const [restoredNotice, setRestoredNotice] =
+    useState(Boolean(savedDraft));
 
   /* =======================================================
      Load questions
@@ -342,18 +421,127 @@ export default function TestRunner({
 
   const testQuestions = useMemo(() => {
     /*
-     * For now weak-topics uses the same question pool.
-     *
-     * Later you can replace this with your weak-topic
-     * filtering logic.
+     * Restore the exact questions/order from an unfinished
+     * attempt when possible. Otherwise create a fresh test.
      */
+    if (
+      savedDraft?.questionIds?.length &&
+      dbQuestions.length > 0
+    ) {
+      const questionsById = new Map(
+        dbQuestions
+          .filter((question) => question.id)
+          .map((question) => [
+            question.id as string,
+            question,
+          ])
+      );
+
+      const restoredQuestions =
+        savedDraft.questionIds
+          .map((id) => questionsById.get(id))
+          .filter(
+            (question): question is Question =>
+              Boolean(question)
+          );
+
+      if (
+        restoredQuestions.length ===
+        savedDraft.questionIds.length
+      ) {
+        return restoredQuestions;
+      }
+    }
+
     return shuffleQuestions(
       dbQuestions,
       questionLimit
     );
-  }, [dbQuestions, questionLimit]);
+  }, [
+    dbQuestions,
+    questionLimit,
+    savedDraft,
+  ]);
 
   const current = testQuestions[index];
+
+  /* =======================================================
+     Local autosave / recovery
+  ======================================================= */
+
+  useEffect(() => {
+    if (
+      finished ||
+      loadingQuestions ||
+      testQuestions.length === 0
+    ) {
+      return;
+    }
+
+    const questionIds = testQuestions
+      .map((question) => question.id)
+      .filter((id): id is string => Boolean(id));
+
+    if (questionIds.length !== testQuestions.length) {
+      return;
+    }
+
+    const draft: SavedTestAttempt = {
+      subject,
+      mode: normalizedMode,
+      questionIds,
+      index,
+      selected,
+      score,
+      userAnswers,
+      timeLeft,
+      savedAt: new Date().toISOString(),
+    };
+
+    try {
+      window.localStorage.setItem(
+        getTestDraftKey(subject, normalizedMode),
+        JSON.stringify(draft)
+      );
+    } catch (error) {
+      console.error("Could not autosave test:", error);
+    }
+  }, [
+    subject,
+    normalizedMode,
+    finished,
+    loadingQuestions,
+    testQuestions,
+    index,
+    selected,
+    score,
+    userAnswers,
+    timeLeft,
+  ]);
+
+  useEffect(() => {
+    if (!finished) {
+      return;
+    }
+
+    clearTestDraft(subject, normalizedMode);
+  }, [finished, subject, normalizedMode]);
+
+  const committedAnswers = userAnswers.filter(
+    (answer) => answer !== null && answer !== undefined
+  ).length;
+
+  const answeredCount =
+    selected !== null &&
+    (userAnswers[index] === null ||
+      userAnswers[index] === undefined)
+      ? committedAnswers + 1
+      : committedAnswers;
+
+  const remainingCount = Math.max(
+    testQuestions.length - answeredCount,
+    0
+  );
 
   /* =======================================================
      Timed mode countdown
@@ -405,6 +593,7 @@ export default function TestRunner({
       loadingQuestions ||
       finished ||
       saving ||
+      Boolean(resultSaveError) ||
       testQuestions.length === 0 ||
       timeLeft !== 0
     ) {
@@ -415,9 +604,17 @@ export default function TestRunner({
       setSaving(true);
 
       try {
-        await saveResult(score);
+        const saved = await saveResult(score);
+
+        if (saved) {
+          setFinished(true);
+          setResultSaveError("");
+        } else {
+          setResultSaveError(
+            "Your internet connection may be unavailable. Your test progress is safe on this device. Reconnect and retry saving."
+          );
+        }
       } finally {
-        setFinished(true);
         setSaving(false);
       }
     }
@@ -429,6 +626,7 @@ export default function TestRunner({
     loadingQuestions,
     finished,
     saving,
+    resultSaveError,
     testQuestions.length,
     score,
   ]);
@@ -484,12 +682,13 @@ export default function TestRunner({
 
   async function saveResult(
     finalScore: number
-  ) {
+  ): Promise<boolean> {
+    let resultSaved = false;
     if (
       !user ||
       testQuestions.length === 0
     ) {
-      return;
+      return false;
     }
 
     try {
@@ -519,8 +718,10 @@ export default function TestRunner({
           resultError
         );
 
-        return;
+        return false;
       }
+
+      resultSaved = true;
 
       /* ---------------------------------------------------
          Get existing user stats
@@ -541,7 +742,7 @@ export default function TestRunner({
           statsError
         );
 
-        return;
+        return true;
       }
 
       /* ---------------------------------------------------
@@ -603,7 +804,7 @@ export default function TestRunner({
         error: resultsError,
       } = await supabase
         .from("test_results")
-        .select("score, total_questions")
+        .select("subject, score, total_questions, created_at")
         .eq("user_id", user.id);
 
       if (resultsError) {
@@ -612,7 +813,7 @@ export default function TestRunner({
           resultsError
         );
 
-        return;
+        return true;
       }
 
       const totalTests = allResults?.length ?? 0;
@@ -660,11 +861,28 @@ export default function TestRunner({
           updateError
         );
       }
+
+      try {
+        await notifyNewAchievements(
+          user.id,
+          allResults || [],
+          streak
+        );
+      } catch (achievementError) {
+        console.error(
+          "Achievement check failed:",
+          achievementError
+        );
+      }
+
+      return true;
     } catch (error) {
       console.error(
         "Unexpected error saving result:",
         error
       );
+
+      return resultSaved;
     }
   }
 
@@ -945,6 +1163,7 @@ export default function TestRunner({
       setIndex(index + 1);
       setSelected(null);
       setAiExplanation("");
+      setResultSaveError("");
 
       return;
     }
@@ -956,10 +1175,18 @@ export default function TestRunner({
     setSaving(true);
 
     try {
-      await saveResult(updatedScore);
+      const saved = await saveResult(updatedScore);
 
       setScore(updatedScore);
-      setFinished(true);
+
+      if (saved) {
+        setResultSaveError("");
+        setFinished(true);
+      } else {
+        setResultSaveError(
+          "Your result could not be saved because the connection appears to be unavailable. Your progress is safe on this device. Reconnect and press Finish Test again."
+        );
+      }
     } finally {
       setSaving(false);
     }
@@ -1000,7 +1227,31 @@ export default function TestRunner({
   ======================================================= */
 
   function restartTest() {
+    clearTestDraft(subject, normalizedMode);
     window.location.reload();
+  }
+
+  async function retrySavingResult() {
+    if (saving) {
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const saved = await saveResult(score);
+
+      if (saved) {
+        setResultSaveError("");
+        setFinished(true);
+      } else {
+        setResultSaveError(
+          "Still unable to save the result. Your progress remains safe on this device."
+        );
+      }
+    } finally {
+      setSaving(false);
+    }
   }
 
   /* =======================================================
@@ -1793,6 +2044,107 @@ export default function TestRunner({
             </div>
           </div>
 
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 14,
+              flexWrap: "wrap",
+              marginBottom: 18,
+              padding: "11px 14px",
+              borderRadius: 12,
+              background: colors.card,
+              border: `1px solid ${colors.border}`,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+                fontSize: 12,
+              }}
+            >
+              <strong
+                style={{
+                  color: colors.text,
+                  fontWeight: 800,
+                }}
+              >
+                {answeredCount} of {testQuestions.length} answered
+              </strong>
+
+              <span style={{ color: colors.muted }}>•</span>
+
+              <span
+                style={{
+                  color: colors.muted,
+                  fontWeight: 600,
+                }}
+              >
+                {remainingCount} remaining
+              </span>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                color: colors.muted,
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+              title="Your unfinished test is saved in this browser"
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  color: colors.green,
+                  fontSize: 12,
+                }}
+              >
+                ✓
+              </span>
+              Saved
+            </div>
+          </div>
+
+          {restoredNotice && (
+            <div
+              role="status"
+              style={{
+                marginBottom: 18,
+                padding: "12px 14px",
+                borderRadius: 14,
+                background: colors.purpleSoft,
+                border: `1px solid ${colors.purple}55`,
+                color: colors.text,
+                fontSize: 13,
+                lineHeight: 1.55,
+                fontWeight: 700,
+              }}
+            >
+              ↻ Your unfinished test was restored. You can continue where you left off.
+              <button
+                type="button"
+                onClick={() => setRestoredNotice(false)}
+                style={{
+                  marginLeft: 10,
+                  border: 0,
+                  background: "transparent",
+                  color: colors.purple,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {/* Question Card */}
 
           <div
@@ -2058,6 +2410,47 @@ export default function TestRunner({
                       color={colors.text}
                     />
                   </div>
+                </div>
+              )}
+
+              {resultSaveError && (
+                <div
+                  role="alert"
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px",
+                    borderRadius: 14,
+                    background: colors.redSoft,
+                    border: `1px solid ${colors.red}55`,
+                    color: colors.text,
+                    fontSize: 13,
+                    lineHeight: 1.55,
+                    fontWeight: 700,
+                  }}
+                >
+                  {resultSaveError}
+
+                  {isTimedMode && timeLeft === 0 && (
+                    <button
+                      type="button"
+                      onClick={retrySavingResult}
+                      disabled={saving}
+                      style={{
+                        marginLeft: 10,
+                        padding: "7px 10px",
+                        borderRadius: 10,
+                        border: 0,
+                        background: colors.purple,
+                        color: "#FFFFFF",
+                        fontWeight: 900,
+                        cursor: saving
+                          ? "not-allowed"
+                          : "pointer",
+                      }}
+                    >
+                      {saving ? "Retrying..." : "Retry Save"}
+                    </button>
+                  )}
                 </div>
               )}
 
