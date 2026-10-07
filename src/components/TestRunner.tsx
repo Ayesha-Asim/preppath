@@ -88,21 +88,14 @@ function normalizeCorrectAnswer(
  */
 function normalizeMathMarkdown(content: string) {
   return content
-    // \$\$ ... \$\$ -> $$ ... $$
-    .replace(/\\\$\\\$/g, "$$")
-
-    // \$ ... \$ -> $ ... $
-    .replace(/\\\$/g, "$")
-
-    // \[ ... \] -> display math
+    .replace(/\r\n/g, "\n")
     .replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => {
-      return `\n\n$$${math.trim()}$$\n\n`;
+      return `\n\n$$\n${String(math).trim()}\n$$\n\n`;
     })
-
-    // \( ... \) -> inline math
     .replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => {
-      return `$${math.trim()}$`;
-    });
+      return `$${String(math).trim()}$`;
+    })
+    .trim();
 }
 
 function MathExplanation({
