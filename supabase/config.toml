@@ -1,6 +1,6 @@
 
 [functions.delete-user]
-enabled = true
+enabled = false
 verify_jwt = false
 import_map = "./functions/delete-user/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
@@ -11,7 +11,7 @@ entrypoint = "./functions/delete-user/index.ts"
 # static_files = [ "./functions/delete-user/*.html" ]
 
 [functions.send-exam-reminders]
-enabled = true
+enabled = false
 verify_jwt = false
 import_map = "./functions/send-exam-reminders/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
@@ -20,3 +20,13 @@ entrypoint = "./functions/send-exam-reminders/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/send-exam-reminders/*.html" ]
+
+[auth.email]
+enable_confirmations = true
+
+[auth]
+site_url = "http://localhost:5173"
+additional_redirect_urls = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173"
+]

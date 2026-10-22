@@ -85,12 +85,7 @@ export default function AdminDashboard() {
           head: true,
         }),
 
-      supabase
-        .from("test_results")
-        .select("*", {
-          count: "exact",
-          head: true,
-        }),
+      supabase.rpc("get_admin_total_tests"),
 
       supabase
         .from("questions")
@@ -123,7 +118,7 @@ export default function AdminDashboard() {
 
     setStats({
       users: usersResult.count ?? 0,
-      tests: testsResult.count ?? 0,
+      tests: testsResult.data ?? 0,
       questions: questionsResult.count ?? 0,
     });
 

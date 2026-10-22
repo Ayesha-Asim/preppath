@@ -10,11 +10,18 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-if (!/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/.test(supabaseUrl)) {
+const isCloudSupabase =
+  /^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/.test(supabaseUrl);
+
+const isLocalSupabase =
+  /^http:\/\/(127\.0\.0\.1|localhost):54321\/?$/.test(supabaseUrl);
+
+if (!isCloudSupabase && !isLocalSupabase) {
   throw new Error(
-    "VITE_SUPABASE_URL is invalid. Use only the project URL, for example https://project-ref.supabase.co"
+    "Invalid Supabase URL. Use a Supabase cloud URL or the local development URL."
   );
 }
+
 
 export const supabase = createClient(
   supabaseUrl.replace(/\/$/, ""),
