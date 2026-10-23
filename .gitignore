@@ -36,3 +36,4 @@ supabase/.branches/
 # Local database schema reference files
 supabase/v1_schema.sql
 supabase/v2_schema_draft.sql
+supabase/snippets/
