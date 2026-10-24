@@ -37,3 +37,6 @@ supabase/.branches/
 supabase/v1_schema.sql
 supabase/v2_schema_draft.sql
 supabase/snippets/
+
+questions_backup.sql
+questions_only.sql
