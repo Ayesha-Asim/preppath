@@ -1096,10 +1096,7 @@ ${performanceContext}
                 "Provider stream ended unexpectedly.",
               );
 
-              /*
-               * Preserve partial output if the student
-               * already received useful text.
-               */
+              // Retry if no answer has reached the student.
               if (!anythingSentToBrowser) {
                 if (attempt === 1) {
                   continue;
@@ -1108,6 +1105,13 @@ ${performanceContext}
                 outputController.enqueue(
                   encoder.encode(
                     "The AI response was interrupted. Please try again.",
+                  ),
+                );
+              } else {
+                // Warn the student that the partial answer is incomplete.
+                outputController.enqueue(
+                  encoder.encode(
+                    "\n\n⚠️ This response was interrupted and may be incomplete. Please try again.",
                   ),
                 );
               }
