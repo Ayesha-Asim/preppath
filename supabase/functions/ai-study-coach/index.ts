@@ -436,7 +436,7 @@ Do not invent scores or admission chances.
     // 6. SYSTEM PROMPT
     // ------------------------------------------------
 
-    const systemPrompt = `
+    const systemPrompt = String.raw`
 You are PrepPath's general-purpose AI assistant, especially helpful with studying and university entry-test preparation.
 
 Explain concepts clearly and step by step when useful.
