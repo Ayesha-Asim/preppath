@@ -502,8 +502,8 @@ ${performanceContext}
     // ------------------------------------------------
 
     const callGroq = async (
-        attempt: number,
-    ): Promise<Response> => {
+      attempt: number,
+    ): Promise<{ response: Response; clearTimeout: () => void }> => {
       const attemptStarted = Date.now();
 
       console.log(
@@ -518,7 +518,7 @@ ${performanceContext}
       const timeout =
         setTimeout(
           () => controller.abort(),
-          25000,
+          90000,
         );
 
       try {
@@ -573,10 +573,14 @@ ${performanceContext}
           response.status,
         );
 
-        return response;
-            } finally {
-                clearTimeout(timeout);
-        }
+        return {
+          response,
+          clearTimeout: () => clearTimeout(timeout),
+        };
+      } catch (error) {
+        clearTimeout(timeout);
+        throw error;
+      }
     };
 
     // ------------------------------------------------
@@ -607,10 +611,14 @@ ${performanceContext}
               Date.now();
 
             let providerResponse: Response;
+            let clearProviderTimeout: (() => void) | null = null;
 
             try {
-              providerResponse =
+              const groqResult =
                 await callGroq(attempt);
+
+              providerResponse = groqResult.response;
+              clearProviderTimeout = groqResult.clearTimeout;
             } catch (error) {
               console.error(
                 `Groq connection failed attempt ${attempt}:`,
@@ -642,6 +650,8 @@ ${performanceContext}
               } catch {
                 // Ignore malformed provider error.
               }
+              clearProviderTimeout?.();
+              clearProviderTimeout = null;
 
               console.error(
                 `Groq request failed attempt ${attempt}:`,
@@ -681,6 +691,8 @@ ${performanceContext}
             }
 
             if (!providerResponse.body) {
+              clearProviderTimeout?.();
+              clearProviderTimeout = null;
               console.error(
                 `Attempt ${attempt} returned an empty body.`,
               );
@@ -977,6 +989,9 @@ ${performanceContext}
               } catch {
                 // Ignore.
               }
+
+              clearProviderTimeout?.();
+              clearProviderTimeout = null;
             }
 
             console.log(
