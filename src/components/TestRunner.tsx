@@ -257,9 +257,10 @@ export default function TestRunner({
         if (!cancelled) setResultSaveError("Unable to load a secure test. Please retry later.");
       } finally { if(!cancelled) setLoadingQuestions(false); }
     }
-    if(user) void loadQuestions(); else setLoadingQuestions(false);
+    if(user?.id) void loadQuestions();
     return ()=>{cancelled=true};
   },[subject,isTimedMode,is50Questions,user?.id]);
+  // The signed-in user ID determines when a new server attempt is loaded.
 
   const testQuestions = dbQuestions;
 
@@ -295,7 +296,9 @@ export default function TestRunner({
   },[isTimedMode,expiresAt,finished,loadingQuestions]);
   useEffect(()=>{
     if(isTimedMode && expiresAt && timeLeft===0 && !finished && !saving && attemptId && !resultSaveError)
-      void retrySavingResult();
+      void secureRpc<SecureState>("finalize_secure_test",{p_attempt_id:attemptId})
+        .then(state=>{setScore(state.score??0);setDbQuestions(convertSecureQuestions(state.questions));setFinished(state.finished);setResultSaveError("");})
+        .catch(error=>{console.error("Timed finalization failed:",error);setResultSaveError("Timed test could not be finalized. Please retry.");});
   },[isTimedMode,expiresAt,timeLeft,finished,saving,attemptId,resultSaveError]);
 
   /* =======================================================
@@ -303,8 +306,6 @@ export default function TestRunner({
   ======================================================= */
 
   useEffect(() => {
-    setBookmarkMessage("");
-
     async function checkBookmark() {
       if (!current?.id) {
         setBookmarked(false);
@@ -327,7 +328,7 @@ export default function TestRunner({
       }
     }
 
-    checkBookmark();
+    void checkBookmark();
   }, [current]);
 
   /* =======================================================
