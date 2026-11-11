@@ -157,5 +157,18 @@ grant execute on function public.secure_test_state(uuid) to authenticated;
 grant execute on function public.start_secure_test(text,text) to authenticated;
 grant execute on function public.submit_secure_test_answer(uuid,integer,integer) to authenticated;
 grant execute on function public.finalize_secure_test(uuid) to authenticated;
--- Important: review all existing grants and permissive policies for test_results and
--- user_stats before deployment. Do not assume this migration alone seals legacy writes.
+-- Block direct student writes to authoritative scores and aggregates.
+-- Service-role and SECURITY DEFINER functions continue to use privileged access.
+revoke insert, update, delete on public.test_results from anon, authenticated;
+revoke insert, update, delete on public.user_stats from anon, authenticated;
+-- Remove any permissive legacy policies allowing direct result creation or stats forgery.
+-- Existing policies must be inspected by name before deployment; REVOKE does not
+-- override future grants or other SECURITY DEFINER functions.
+
+-- Only the owner can read their own results, regardless of older permissive SELECT policies.
+-- NOTE: PostgreSQL permissive policies combine with OR. Audit and remove any
+-- existing broad SELECT policies before applying this migration.
+
+-- The original practice bookmarks page reads correct_answer and explanation.
+-- That page requires a separate server-mediated feedback workflow before rollout.
+-- DO NOT APPLY THIS MIGRATION UNTIL THE FULL DEPENDENCY AUDIT IS COMPLETE.
