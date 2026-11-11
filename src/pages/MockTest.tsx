@@ -390,7 +390,7 @@ export default function MockTest() {
 
           .from("questions")
 
-          .select("*", {
+          .select("id", {
 
             count: "exact",
 
