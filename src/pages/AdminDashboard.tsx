@@ -89,7 +89,7 @@ export default function AdminDashboard() {
 
       supabase
         .from("questions")
-        .select("*", {
+        .select("id", {
           count: "exact",
           head: true,
         }),
