@@ -294,9 +294,9 @@ export default function TestRunner({
     return ()=>window.clearInterval(timer);
   },[isTimedMode,expiresAt,finished,loadingQuestions]);
   useEffect(()=>{
-    if(isTimedMode && timeLeft===0 && !finished && !saving && attemptId && !resultSaveError)
+    if(isTimedMode && expiresAt && timeLeft===0 && !finished && !saving && attemptId && !resultSaveError)
       void retrySavingResult();
-  },[isTimedMode,timeLeft,finished,saving,attemptId,resultSaveError]);
+  },[isTimedMode,expiresAt,timeLeft,finished,saving,attemptId,resultSaveError]);
 
   /* =======================================================
      Check bookmark for current question
@@ -343,7 +343,7 @@ export default function TestRunner({
             100
         );
 
-  async function saveResult(_finalScore: number): Promise<boolean> {
+  async function saveResult(): Promise<boolean> {
     if(!attemptId) return false;
     try {
       const state=await secureRpc<SecureState>("finalize_secure_test",{p_attempt_id:attemptId});
@@ -608,7 +608,7 @@ export default function TestRunner({
       if(index<testQuestions.length-1){
         setIndex(index+1);setSelected(answers[index+1]??null);setAiExplanation("");
       }else{
-        const saved=await saveResult(0);
+        const saved=await saveResult();
         if(!saved) setResultSaveError("Your answer is saved on the server. Retry finishing the test.");
       }
     }catch(error){console.error("Secure answer failed:",error);
@@ -651,9 +651,26 @@ export default function TestRunner({
      Restart
   ======================================================= */
 
-  function restartTest() {
-    // A retake requires a new server attempt; finalized attempts cannot be modified.
-    window.location.reload();
+  async function restartTest() {
+    setSaving(true);
+    try {
+      const state=await secureRpc<SecureState>("start_secure_test",
+        {p_subject:subject,p_mode:isTimedMode?"timed-mode":is50Questions?"50-questions":"20-questions"});
+      setAttemptId(state.attempt_id);
+      setExpiresAt(state.expires_at);
+      setDbQuestions(convertSecureQuestions(state.questions));
+      const answers=state.questions.map(q=>q.selected);
+      setUserAnswers(answers);
+      setIndex(Math.max(0,answers.findIndex(answer=>answer===null)));
+      setSelected(null);
+      setScore(state.score??0);
+      setFinished(state.finished);
+      setAiExplanation("");
+      setResultSaveError("");
+      setRestoredNotice(false);
+    }catch(error){console.error("Retake failed:",error);
+      setResultSaveError("Unable to start a new test. Please retry.");
+    }finally{setSaving(false);}
   }
 
   async function retrySavingResult() {
@@ -664,7 +681,7 @@ export default function TestRunner({
     setSaving(true);
 
     try {
-      const saved = await saveResult(score);
+      const saved = await saveResult();
 
       if (saved) {
         setResultSaveError("");
