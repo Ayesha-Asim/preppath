@@ -73,7 +73,10 @@ declare wanted integer;
 declare selected_count integer;
 begin
   if auth.uid() is null then raise exception 'Authentication required'; end if;
-  if p_mode not in ('20-questions','50-questions','timed-mode') then raise exception 'Invalid mode'; end if;
+  if p_mode is null or p_mode not in ('20-questions','50-questions','timed-mode') then raise exception 'Invalid mode'; end if;
+  if p_subject is null or length(trim(p_subject))=0 then raise exception 'Invalid subject'; end if;
+  -- Serialize concurrent starts for one student/subject/mode.
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(auth.uid()::text || ':' || p_subject || ':' || p_mode, 0));
   wanted := case when p_mode='50-questions' then 50 else 20 end;
   -- Reuse the most recent unfinished attempt for this user/subject/mode.
   select * into a from public.secure_test_attempts
@@ -100,12 +103,13 @@ declare prior integer;
 declare prior_at timestamptz;
 begin
   if auth.uid() is null then raise exception 'Authentication required'; end if;
-  if p_answer not between 0 and 3 then raise exception 'Invalid answer'; end if;
+  if p_answer is null or p_answer not between 0 and 3 then raise exception 'Invalid answer'; end if;
   select * into a from public.secure_test_attempts
     where id=p_attempt_id and user_id=auth.uid() for update;
   if not found then raise exception 'Attempt not found'; end if;
-  if a.finished_at is not null or (a.expires_at is not null and now() >= a.expires_at)
-    then raise exception 'Attempt closed'; end if;
+  if a.finished_at is not null then raise exception 'Attempt closed'; end if;
+  -- Network retries with the same answer are safe even after expiry.
+  -- New answers cannot be submitted after expiry.
   select answer, answered_at into prior, prior_at from public.secure_test_items
     where attempt_id=a.id and position=p_position for update;
   if not found then raise exception 'Question not found'; end if;
@@ -113,6 +117,7 @@ begin
     if prior = p_answer then return jsonb_build_object('saved',true,'duplicate',true); end if;
     raise exception 'Answer already submitted';
   end if;
+  if a.expires_at is not null and now() >= a.expires_at then raise exception 'Attempt expired'; end if;
   update public.secure_test_items set answer=p_answer, answered_at=now()
     where attempt_id=a.id and position=p_position;
   return jsonb_build_object('saved',true,'duplicate',false);
@@ -135,8 +140,8 @@ begin
     into question_count,correct_count
     from public.secure_test_items i join public.questions q on q.id=i.question_id
     where i.attempt_id=a.id;
-  insert into public.test_results(user_id,subject,score,total,total_questions,correct_answers)
-    values(a.user_id,a.subject,correct_count,question_count,question_count,correct_count)
+  insert into public.test_results(user_id,subject,score,total_questions,correct_answers)
+    values(a.user_id,a.subject,correct_count,question_count,correct_count)
     returning id into new_result;
   update public.secure_test_attempts set finished_at=now(),result_id=new_result where id=a.id;
   -- Aggregate statistics are computed from trusted result rows, never browser scores.
