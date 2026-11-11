@@ -359,7 +359,8 @@ export default function TestRunner({
   ======================================================= */
 
   async function getAIExplanation() {
-  if (!current || selected === null) {
+  if (!current || selected === null || current.answer < 0) {
+    setAiExplanation("Answer explanations are available after you finish the test.");
     return;
   }
 
