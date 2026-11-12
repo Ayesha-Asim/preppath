@@ -100,7 +100,6 @@ export default function ManageQuestions() {
     setLoading(true);
 
     const from = (page - 1) * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
 
     const { data, error } = await supabase.rpc("admin_list_questions", {
       p_subject: subject === "All" ? null : subject,
