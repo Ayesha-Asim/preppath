@@ -93,7 +93,7 @@ export default function Bookmarks() {
 
   useEffect(() => {
     if (!profileLoading) {
-      void loadBookmarks();
+      void Promise.resolve().then(() => loadBookmarks());
     }
   }, [loadBookmarks, profileLoading]);
 
