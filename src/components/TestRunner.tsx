@@ -1985,7 +1985,7 @@ export default function TestRunner({
 
                 <button
                   type="button"
-                  onClick={getAIExplanation}
+                  onClick={() => void getAIExplanation()}
                   disabled={
                     selected === null || current.answer < 0 ||
                     loadingAIExplanation ||
