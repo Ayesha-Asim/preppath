@@ -12,12 +12,6 @@ type Bookmark = {
     id: string;
     subject: string;
     question: string;
-    option_a: string;
-    option_b: string;
-    option_c: string;
-    option_d: string;
-    correct_answer: number;
-    explanation: string;
   };
 };
 
@@ -74,12 +68,6 @@ export default function Bookmarks() {
             id,
             subject,
             question,
-            option_a,
-            option_b,
-            option_c,
-            option_d,
-            correct_answer,
-            explanation
           )
         `)
         .eq("user_id", user.id);
