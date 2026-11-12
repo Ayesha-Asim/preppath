@@ -67,7 +67,7 @@ export default function Bookmarks() {
           question:questions!bookmarked_questions_question_id_fkey (
             id,
             subject,
-            question,
+            question
           )
         `)
         .eq("user_id", user.id);
