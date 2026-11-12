@@ -1,0 +1,27 @@
+name: V2 Security and Compatibility Checks
+
+on:
+  pull_request:
+    branches: [v2-development]
+  push:
+    branches: [v2-secure-compatibility-fixes]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Lint changed security-sensitive files
+        run: npx eslint src/components/TestRunner.tsx src/components/AddQuestion.tsx src/components/ManageQuestions.tsx src/pages/Bookmarks.tsx src/pages/Dashboard.tsx src/pages/MockTest.tsx src/pages/AdminDashboard.tsx
+      - name: Full repository lint baseline
+        continue-on-error: true
+        run: npm run lint
