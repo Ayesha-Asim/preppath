@@ -396,7 +396,7 @@ export default function TestRunner({
   async function getAIExplanation(targetQuestion: Question = current, targetAnswer: number | null = selected, reviewKey?: string) {
   const updateExplanation = (value: string) => {
     if (reviewKey !== undefined) setAiReviewExplanations((values) => ({ ...values, [reviewKey]: value }));
-    else updateExplanation(value);
+    else setAiExplanation(value);
   };
   if (!targetQuestion || targetAnswer === null || targetQuestion.answer < 0) {
     updateExplanation("Answer explanations are available after you finish the test.");
