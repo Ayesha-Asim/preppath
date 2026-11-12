@@ -393,7 +393,7 @@ export default function TestRunner({
      AI explanation
   ======================================================= */
 
-  async function getAIExplanation(targetQuestion: Question = current, targetAnswer: number | null = selected, reviewKey?: string) {
+  async function getAIExplanation(targetQuestion: Question | undefined = current, targetAnswer: number | null = selected, reviewKey?: string) {
   const updateExplanation = (value: string) => {
     if (reviewKey !== undefined) setAiReviewExplanations((values) => ({ ...values, [reviewKey]: value }));
     else setAiExplanation(value);
