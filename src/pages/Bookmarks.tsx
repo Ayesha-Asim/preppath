@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import MainLayout from "../components/MainLayout";
 import { useAuth } from "../context/AuthContext";
@@ -42,15 +42,7 @@ export default function Bookmarks() {
 
   const bookmarkCount = bookmarks.length;
 
-  useEffect(() => {
-    if (profileLoading) {
-      return;
-    }
-
-    loadBookmarks();
-  }, [user, profileLoading]);
-
-  async function loadBookmarks() {
+  const loadBookmarks = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
 
@@ -97,7 +89,13 @@ export default function Bookmarks() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [user]);
+
+  useEffect(() => {
+    if (!profileLoading) {
+      void loadBookmarks();
+    }
+  }, [loadBookmarks, profileLoading]);
 
   async function removeBookmark(bookmark: Bookmark) {
     setRemovingId(bookmark.id);
