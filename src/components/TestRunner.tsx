@@ -218,6 +218,12 @@ export default function TestRunner({
   const [aiExplanation, setAiExplanation] =
     useState("");
 
+  const [aiReviewExplanations, setAiReviewExplanations] =
+    useState<Record<string, string>>({});
+
+  const [loadingAIReviewKey, setLoadingAIReviewKey] =
+    useState<string | null>(null);
+
   const [
     loadingAIExplanation,
     setLoadingAIExplanation,
@@ -387,21 +393,26 @@ export default function TestRunner({
      AI explanation
   ======================================================= */
 
-  async function getAIExplanation() {
-  if (!current || selected === null || current.answer < 0) {
-    setAiExplanation("Answer explanations are available after you finish the test.");
+  async function getAIExplanation(targetQuestion: Question = current, targetAnswer: number | null = selected, reviewKey?: string) {
+  const updateExplanation = (value: string) => {
+    if (reviewKey !== undefined) setAiReviewExplanations((values) => ({ ...values, [reviewKey]: value }));
+    else updateExplanation(value);
+  };
+  if (!targetQuestion || targetAnswer === null || targetQuestion.answer < 0) {
+    updateExplanation("Answer explanations are available after you finish the test.");
     return;
   }
 
-  setLoadingAIExplanation(true);
-  setAiExplanation("");
+  if (reviewKey !== undefined) setLoadingAIReviewKey(reviewKey);
+  else setLoadingAIExplanation(true);
+  updateExplanation("");
 
   try {
     const selectedAnswer =
-      current.options[selected];
+      targetQuestion.options[targetAnswer];
 
     const correctAnswer =
-      current.answer >= 0 ? current.options[current.answer] : "Not available before finishing";
+      targetQuestion.answer >= 0 ? targetQuestion.options[targetQuestion.answer] : "Not available before finishing";
 
     // Get the current authenticated session.
     const {
@@ -409,7 +420,7 @@ export default function TestRunner({
     } = await supabase.auth.getSession();
 
     if (!session?.access_token) {
-      setAiExplanation(
+      updateExplanation(
         "Please sign in again to use AI explanations."
       );
       return;
@@ -426,7 +437,7 @@ export default function TestRunner({
         "Missing Supabase environment variables."
       );
 
-      setAiExplanation(
+      updateExplanation(
         "AI explanations are temporarily unavailable."
       );
       return;
@@ -449,12 +460,12 @@ export default function TestRunner({
 
         body: JSON.stringify({
           subject,
-          question: current.question,
-          options: current.options,
+          question: targetQuestion.question,
+          options: targetQuestion.options,
           selectedAnswer,
           correctAnswer,
           existingExplanation:
-            current.explanation,
+            targetQuestion.explanation,
         }),
       }
     );
@@ -551,7 +562,7 @@ export default function TestRunner({
 
             // Update React immediately as
             // each piece of text arrives.
-            setAiExplanation(
+            updateExplanation(
               fullExplanation
             );
           }
@@ -590,7 +601,7 @@ export default function TestRunner({
           ) {
             fullExplanation += content;
 
-            setAiExplanation(
+            updateExplanation(
               fullExplanation
             );
           }
@@ -601,7 +612,7 @@ export default function TestRunner({
     }
 
     if (!fullExplanation.trim()) {
-      setAiExplanation(
+      updateExplanation(
         "No explanation was generated."
       );
     }
@@ -611,13 +622,14 @@ export default function TestRunner({
       error
     );
 
-    setAiExplanation(
+    updateExplanation(
       error instanceof Error
         ? error.message
         : "Something went wrong while generating the AI explanation."
     );
   } finally {
-    setLoadingAIExplanation(false);
+    if (reviewKey !== undefined) setLoadingAIReviewKey(null);
+    else setLoadingAIExplanation(false);
   }
 }
 
@@ -1297,6 +1309,33 @@ export default function TestRunner({
                             </div>
                           )}
                         </div>
+
+                        {userAnswer !== null && userAnswer !== undefined && (
+                          <div style={{ marginTop: 12 }}>
+                            <button
+                              type="button"
+                              onClick={() => void getAIExplanation(q, userAnswer, String(i))}
+                              disabled={loadingAIReviewKey === String(i)}
+                              style={{
+                                border: `1px solid ${colors.purple}`,
+                                borderRadius: 10,
+                                padding: "9px 12px",
+                                background: colors.purpleSoft,
+                                color: colors.purple,
+                                fontWeight: 800,
+                                cursor: loadingAIReviewKey === String(i) ? "wait" : "pointer",
+                              }}
+                            >
+                              {loadingAIReviewKey === String(i) ? "Generating..." : "Explain with AI"}
+                            </button>
+                            {aiReviewExplanations[String(i)] && (
+                              <div style={{ marginTop: 12, padding: 14, borderRadius: 12, background: colors.card, border: `1px solid ${colors.border}` }}>
+                                <strong style={{ color: colors.purple }}>AI Explanation</strong>
+                                <MathExplanation text={aiReviewExplanations[String(i)]} color={colors.text} />
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {q.explanation && (
                           <div
