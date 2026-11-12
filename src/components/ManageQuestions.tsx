@@ -102,37 +102,12 @@ export default function ManageQuestions() {
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
-    let query = supabase
-      .from("questions")
-      .select(
-        `
-          id,
-          subject,
-          question,
-          option_a,
-          option_b,
-          option_c,
-          option_d,
-          correct_answer,
-          explanation
-        `,
-        { count: "exact" }
-      )
-      .order("created_at", { ascending: false })
-      .range(from, to);
-
-    if (subject !== "All") {
-      query = query.eq("subject", subject);
-    }
-
-    if (search.trim()) {
-      query = query.ilike(
-        "question",
-        `%${search.trim()}%`
-      );
-    }
-
-    const { data, count, error } = await query;
+    const { data, error } = await supabase.rpc("admin_list_questions", {
+      p_subject: subject === "All" ? null : subject,
+      p_search: search.trim() || null,
+      p_limit: PAGE_SIZE,
+      p_offset: from,
+    });
 
     if (error) {
       console.error("Failed to load questions:", error);
@@ -142,8 +117,9 @@ export default function ManageQuestions() {
       return;
     }
 
-    setQuestions((data ?? []) as QuestionRow[]);
-    setTotal(count ?? 0);
+    const result = data as { questions?: QuestionRow[]; total?: number } | null;
+    setQuestions(result?.questions ?? []);
+    setTotal(Number(result?.total ?? 0));
     setLoading(false);
   }
 
@@ -164,21 +140,17 @@ export default function ManageQuestions() {
 
     setSaving(true);
 
-    const { data, error } = await supabase
-      .from("questions")
-      .update({
-        subject: editing.subject,
-        question: editing.question.trim(),
-        option_a: editing.option_a.trim(),
-        option_b: editing.option_b.trim(),
-        option_c: editing.option_c.trim(),
-        option_d: editing.option_d.trim(),
-        correct_answer: editing.correct_answer,
-        explanation:
-          editing.explanation?.trim() || null,
-      })
-      .eq("id", editing.id)
-      .select("id");
+    const { data, error } = await supabase.rpc("admin_update_question", {
+      p_question_id: editing.id,
+      p_subject: editing.subject,
+      p_question: editing.question.trim(),
+      p_option_a: editing.option_a.trim(),
+      p_option_b: editing.option_b.trim(),
+      p_option_c: editing.option_c.trim(),
+      p_option_d: editing.option_d.trim(),
+      p_correct_answer: editing.correct_answer,
+      p_explanation: editing.explanation?.trim() || null,
+    });
 
     setSaving(false);
 
@@ -188,10 +160,8 @@ export default function ManageQuestions() {
       return;
     }
 
-    if (!data || data.length !== 1) {
-      alert(
-        "The question was not updated. Please check your permissions."
-      );
+    if (!data) {
+      alert("The question was not updated. Please check your permissions.");
       return;
     }
 
@@ -210,11 +180,9 @@ export default function ManageQuestions() {
 
     setDeletingId(item.id);
 
-    const { data, error } = await supabase
-      .from("questions")
-      .delete()
-      .eq("id", item.id)
-      .select("id");
+    const { data, error } = await supabase.rpc("admin_delete_question", {
+      p_question_id: item.id,
+    });
 
     setDeletingId(null);
 
@@ -224,10 +192,8 @@ export default function ManageQuestions() {
       return;
     }
 
-    if (!data || data.length !== 1) {
-      alert(
-        "The question was not deleted. Please check your permissions."
-      );
+    if (data !== true) {
+      alert("The question was not deleted. It may be in existing test history.");
       return;
     }
 
@@ -250,45 +216,23 @@ export default function ManageQuestions() {
     try {
       const batchSize = 1000;
       let from = 0;
-
       let allQuestions: Record<string, unknown>[] = [];
 
       while (true) {
-        const { data, error } = await supabase
-          .from("questions")
-          .select(
-            `
-              id,
-              subject,
-              question,
-              option_a,
-              option_b,
-              option_c,
-              option_d,
-              correct_answer,
-              explanation,
-              difficulty,
-              created_at
-            `
-          )
-          .order("created_at", { ascending: true })
-          .range(from, from + batchSize - 1);
+        const { data, error } = await supabase.rpc("admin_list_questions", {
+          p_subject: null,
+          p_search: null,
+          p_limit: batchSize,
+          p_offset: from,
+        });
 
-        if (error) {
-          throw error;
-        }
+        if (error) throw error;
 
-        const batch = data ?? [];
+        const result = data as { questions?: Record<string, unknown>[]; total?: number } | null;
+        const batch = result?.questions ?? [];
+        allQuestions = [...allQuestions, ...batch];
 
-        allQuestions = [
-          ...allQuestions,
-          ...batch,
-        ];
-
-        if (batch.length < batchSize) {
-          break;
-        }
-
+        if (batch.length < batchSize) break;
         from += batchSize;
       }
 
@@ -724,18 +668,14 @@ export default function ManageQuestions() {
             i + insertBatchSize
           );
 
-        const { data, error } =
-          await supabase
-            .from("questions")
-            .insert(batch)
-            .select("id");
+        const { data, error } = await supabase.rpc("admin_import_questions", {
+          p_questions: batch,
+        });
 
-        if (error) {
-          throw error;
-        }
+        if (error) throw error;
 
-        inserted +=
-          data?.length ?? 0;
+        const result = data as { inserted?: number } | null;
+        inserted += Number(result?.inserted ?? 0);
       }
 
       await loadQuestions();
