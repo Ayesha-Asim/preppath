@@ -45,6 +45,8 @@ revoke all on table public.secure_test_items from public, anon, authenticated;
 -- Students may read question stems and options, never the answer key.
 -- Admin operations use narrowly scoped SECURITY DEFINER functions below.
 revoke all on table public.questions from anon, authenticated;
+-- Explicitly clear any legacy column-level answer grants as well.
+revoke select (correct_answer, explanation) on table public.questions from anon, authenticated;
 grant select (id, subject, question, option_a, option_b, option_c, option_d, difficulty, created_at)
   on table public.questions to authenticated;
 
