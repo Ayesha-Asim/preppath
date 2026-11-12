@@ -37,48 +37,9 @@ type SubjectCard = {
 type TestMode = "20 Questions" | "50 Questions" | "Timed Mode";
 
 
-type SavedTestAttempt = {
-  subject: string;
-  mode: string;
-  questionIds: string[];
-  index: number;
-  selected: number | null;
-  score: number;
-  userAnswers: (number | null)[];
-  timeLeft: number;
-  savedAt: string;
-};
-
 function getModeSlug(mode: TestMode) {
   return mode.toLowerCase().replace(/\s+/g, "-");
 }
-
-function getSavedAttempt(subject: string, mode: TestMode): SavedTestAttempt | null {
-  try {
-    const modeSlug = getModeSlug(mode);
-    const raw = localStorage.getItem(
-      `preppath-test-draft:${subject}:${modeSlug}`
-    );
-
-    if (!raw) return null;
-
-    const attempt = JSON.parse(raw) as SavedTestAttempt;
-
-    if (
-      attempt.subject !== subject ||
-      attempt.mode !== modeSlug ||
-      !Array.isArray(attempt.questionIds) ||
-      !Array.isArray(attempt.userAnswers)
-    ) {
-      return null;
-    }
-
-    return attempt;
-  } catch {
-    return null;
-  }
-}
-
 
 
 
@@ -451,25 +412,6 @@ export default function MockTest() {
 
     useState<TestMode>("20 Questions");
 
-  const [draftRefresh, setDraftRefresh] = useState(0);
-
-  useEffect(() => {
-    const refreshDrafts = () => {
-      setDraftRefresh((value) => value + 1);
-    };
-
-    window.addEventListener("focus", refreshDrafts);
-    window.addEventListener("storage", refreshDrafts);
-
-    return () => {
-      window.removeEventListener("focus", refreshDrafts);
-      window.removeEventListener("storage", refreshDrafts);
-    };
-  }, []);
-
-
-
-
   const filteredSubjects = useMemo(() => {
 
     const q = search.trim().toLowerCase();
@@ -543,17 +485,14 @@ export default function MockTest() {
   const startSubject = async (
     subject: SubjectCard
   ) => {
-    const savedAttempt = getSavedAttempt(subject.title, selectedMode);
+    const result = await canStartQuiz();
 
-    if (!savedAttempt) {
-      const result = await canStartQuiz();
-
-      if (!result.allowed) {
-        alert(result.message);
-        return;
-      }
+    if (!result.allowed) {
+      alert(result.message);
+      return;
     }
 
+    // The server resumes an unfinished attempt for this subject and mode.
     const modeSlug = getModeSlug(selectedMode);
 
     navigate(`${subject.path}?mode=${modeSlug}`);
@@ -641,28 +580,9 @@ export default function MockTest() {
                 {visibleSubjects.map((subject) => {
                   const SubjectIcon = subject.icon;
 
-                  // Re-evaluate saved attempts after returning to this page.
-                  void draftRefresh;
-
-                  const savedAttempt = getSavedAttempt(
-                    subject.title,
-                    selectedMode
-                  );
-
-                  const answeredCount = savedAttempt
-                    ? savedAttempt.userAnswers.filter(
-                        (answer) => answer !== null && answer !== undefined
-                      ).length
-                    : 0;
-
-                  const totalQuestions =
-                    savedAttempt?.questionIds.length ?? 0;
-
                   return (
                     <button
-                      className={`mt-subject ${
-                        savedAttempt ? "mt-in-progress" : ""
-                      }`}
+                      className="mt-subject"
                       key={subject.path}
                       onClick={() => startSubject(subject)}
                     >
@@ -688,19 +608,10 @@ export default function MockTest() {
 
                         <small>{subject.desc}</small>
 
-                        {savedAttempt && (
-                          <span className="mt-continue-status">
-                            ● In Progress — {answeredCount}/{totalQuestions} answered
-                          </span>
-                        )}
                       </span>
 
                       <span className="mt-chevron">
-                        {savedAttempt ? (
-                          <span className="mt-continue-text">Continue</span>
-                        ) : (
-                          <ChevronRight size={19} />
-                        )}
+                        <ChevronRight size={19} />
                       </span>
                     </button>
                   );
