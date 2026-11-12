@@ -44,10 +44,10 @@ revoke all on table public.secure_test_items from public, anon, authenticated;
 
 -- Students may read question stems and options, never the answer key.
 -- Admin operations use narrowly scoped SECURITY DEFINER functions below.
-revoke all on table public.questions from anon, authenticated;
+revoke all on table public.questions from public, anon, authenticated;
 -- Clear legacy column-level grants too; table-level REVOKE does not remove them.
 revoke all privileges (id, subject, question, option_a, option_b, option_c, option_d, correct_answer, explanation, difficulty, created_at)
-  on table public.questions from anon, authenticated;
+  on table public.questions from public, anon, authenticated;
 grant select (id, subject, question, option_a, option_b, option_c, option_d, difficulty, created_at)
   on table public.questions to authenticated;
 
@@ -59,9 +59,9 @@ create policy "Authenticated users can read question prompts"
   on public.questions for select to authenticated using (true);
 
 -- Test results and aggregate stats are read-only to clients. Trusted RPCs own writes.
-revoke all on table public.test_results from anon, authenticated;
+revoke all on table public.test_results from public, anon, authenticated;
 revoke all privileges (id, user_id, score, total, subject, created_at, total_questions, correct_answers)
-  on table public.test_results from anon, authenticated;
+  on table public.test_results from public, anon, authenticated;
 grant select on table public.test_results to authenticated;
 
 drop policy if exists "Users can insert their own results" on public.test_results;
@@ -71,9 +71,9 @@ create policy "Users can view their own results"
   on public.test_results for select to authenticated
   using (auth.uid() = user_id);
 
-revoke all on table public.user_stats from anon, authenticated;
+revoke all on table public.user_stats from public, anon, authenticated;
 revoke all privileges (id, user_id, accuracy, streak, total_tests, created_at, last_active_date, tasks, completed_tasks)
-  on table public.user_stats from anon, authenticated;
+  on table public.user_stats from public, anon, authenticated;
 grant select on table public.user_stats to authenticated;
 
 drop policy if exists "Users can insert their own stats" on public.user_stats;
@@ -87,9 +87,9 @@ drop policy if exists "Users can update their own stats" on public.user_stats;
 drop policy if exists "Users can read their own stats" on public.user_stats;
 
 -- Bookmarks remain readable by their owner; mutations go through toggle_bookmark.
-revoke all on table public.bookmarked_questions from anon, authenticated;
+revoke all on table public.bookmarked_questions from public, anon, authenticated;
 revoke all privileges (id, user_id, question_id, created_at)
-  on table public.bookmarked_questions from anon, authenticated;
+  on table public.bookmarked_questions from public, anon, authenticated;
 grant select on table public.bookmarked_questions to authenticated;
 drop policy if exists "Users can insert bookmarks" on public.bookmarked_questions;
 drop policy if exists "Users can update bookmarks" on public.bookmarked_questions;
