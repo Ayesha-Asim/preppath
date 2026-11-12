@@ -126,22 +126,22 @@ begin
 
   if exists (
     select 1
-    from unnest(v_tasks) as task
-    where task is null or length(btrim(task)) = 0 or length(task) > 300
+    from unnest(v_tasks) as items(task_value)
+    where task_value is null or length(btrim(task_value)) = 0 or length(task_value) > 300
   ) then
     raise exception 'Each study task must contain 1 to 300 characters';
   end if;
 
   if exists (
     select 1
-    from unnest(v_completed) as task_index
+    from unnest(v_completed) as items(task_index)
     where task_index is null or task_index < 0 or task_index >= cardinality(v_tasks)
   ) then
     raise exception 'Completed task index is invalid';
   end if;
 
   if cardinality(v_completed) <> (
-    select count(distinct task_index) from unnest(v_completed) as task_index
+    select count(distinct task_index) from unnest(v_completed) as items(task_index)
   ) then
     raise exception 'Completed task indexes must be unique';
   end if;
@@ -236,7 +236,7 @@ begin
     raise exception 'Administrator access required';
   end if;
 
-  if p_subject not in (
+  if p_subject is null or p_subject not in (
     'English', 'Basic Mathematics', 'Advanced Mathematics', 'Physics',
     'Computer Science', 'IQ', 'Analytical Reasoning', 'Quantitative Reasoning'
   ) then
@@ -846,3 +846,8 @@ comment on table public.secure_test_attempts is
   'V2 server-owned mock-test attempts. Client access is exclusively through owner-checked RPCs.';
 comment on table public.secure_test_items is
   'V2 server-owned question order and submitted answers. Correct answers are never stored in client-controlled state.';
+
+
+-- The leaderboard is intentionally shared with signed-in students only.
+revoke all on function public.get_leaderboard() from public, anon;
+grant execute on function public.get_leaderboard() to authenticated;
