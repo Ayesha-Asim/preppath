@@ -234,6 +234,9 @@ export default function TestRunner({
   const [resultSaveError, setResultSaveError] =
     useState("");
 
+  const [testLoadError, setTestLoadError] =
+    useState("");
+
   const [restoredNotice, setRestoredNotice] =
     useState(false);
 
@@ -261,7 +264,18 @@ export default function TestRunner({
         setScore(state.score??0);
       } catch(error) {
         console.error("Secure test loading failed:",error);
-        if (!cancelled) setResultSaveError("Unable to load a secure test. Please retry later.");
+        const rpcError = error as { code?: string; message?: string };
+        const missingRpc =
+          rpcError.code === "PGRST202" ||
+          rpcError.code === "42883" ||
+          (rpcError.message ?? "").toLowerCase().includes("start_secure_test");
+        if (!cancelled) {
+          setTestLoadError(
+            missingRpc
+              ? "Secure mock tests are not configured on this V2 database yet. The required database setup must be applied and verified before questions can load."
+              : "We couldn't connect to the secure test service. Please check your connection and try again."
+          );
+        }
       } finally { if(!cancelled) setLoadingQuestions(false); }
     }
     if(user?.id) void loadQuestions();
@@ -818,6 +832,54 @@ export default function TestRunner({
                 }
               />
             </div>
+          </div>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  /* =======================================================
+     Test service unavailable
+  ======================================================= */
+
+  if (testLoadError) {
+    return (
+      <MainLayout>
+        <div
+          className="testrunner-page"
+          style={{
+            ...styles.page,
+            background: colors.page,
+            color: colors.text,
+          }}
+        >
+          <div
+            role="alert"
+            style={{
+              ...styles.emptyCard,
+              background: colors.card,
+              border: `1px solid ${colors.border}`,
+            }}
+          >
+            <div style={{ ...styles.emptyIcon, background: colors.purpleSoft }}>⚙️</div>
+            <h2 style={{ color: colors.text, margin: 0 }}>Test setup unavailable</h2>
+            <p style={{ color: colors.muted, marginTop: 8 }}>{testLoadError}</p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              style={{
+                marginTop: 12,
+                padding: "11px 18px",
+                border: 0,
+                borderRadius: 10,
+                background: colors.purple,
+                color: "#FFFFFF",
+                fontWeight: 800,
+                cursor: "pointer",
+              }}
+            >
+              Retry
+            </button>
           </div>
         </div>
       </MainLayout>
