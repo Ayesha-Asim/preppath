@@ -6,6 +6,7 @@ import MainLayout from "./MainLayout";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { supabase } from "../lib/supabase";
+import { notifyNewAchievements } from "../lib/achievements";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -297,7 +298,7 @@ export default function TestRunner({
   useEffect(()=>{
     if(isTimedMode && expiresAt && timeLeft===0 && !finished && !saving && attemptId && !resultSaveError)
       void secureRpc<SecureState>("finalize_secure_test",{p_attempt_id:attemptId})
-        .then(state=>{setScore(state.score??0);setDbQuestions(convertSecureQuestions(state.questions));setFinished(state.finished);setResultSaveError("");})
+        .then(async state=>{setScore(state.score??0);setDbQuestions(convertSecureQuestions(state.questions));setFinished(state.finished);setResultSaveError("");if(state.finished) await refreshAchievementNotifications();})
         .catch(error=>{console.error("Timed finalization failed:",error);setResultSaveError("Timed test could not be finalized. Please retry.");});
   },[isTimedMode,expiresAt,timeLeft,finished,saving,attemptId,resultSaveError]);
 
@@ -344,6 +345,30 @@ export default function TestRunner({
             100
         );
 
+  async function refreshAchievementNotifications() {
+    if (!user?.id) return;
+
+    const [{ data: results, error: resultsError }, { data: stats, error: statsError }] =
+      await Promise.all([
+        supabase
+          .from("test_results")
+          .select("subject, score, total_questions, created_at")
+          .eq("user_id", user.id),
+        supabase
+          .from("user_stats")
+          .select("streak")
+          .eq("user_id", user.id)
+          .maybeSingle(),
+      ]);
+
+    if (resultsError || statsError) {
+      console.error("Could not refresh achievement progress:", resultsError || statsError);
+      return;
+    }
+
+    await notifyNewAchievements(user.id, results ?? [], Number(stats?.streak ?? 0));
+  }
+
   async function saveResult(): Promise<boolean> {
     if(!attemptId) return false;
     try {
@@ -351,6 +376,9 @@ export default function TestRunner({
       setScore(state.score??0);
       setDbQuestions(convertSecureQuestions(state.questions));
       setFinished(state.finished);
+      if (state.finished) {
+        await refreshAchievementNotifications();
+      }
       return state.finished;
     } catch(error){console.error("Secure finalize failed:",error);return false;}
   }
