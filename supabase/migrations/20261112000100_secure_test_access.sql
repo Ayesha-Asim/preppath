@@ -45,19 +45,26 @@ revoke all on table public.secure_test_items from public, anon, authenticated;
 -- Students may read question stems and options, never the answer key.
 -- Admin operations use narrowly scoped SECURITY DEFINER functions below.
 revoke all on table public.questions from anon, authenticated;
--- Explicitly clear any legacy column-level answer grants as well.
-revoke select (correct_answer, explanation) on table public.questions from anon, authenticated;
+-- Clear legacy column-level grants too; table-level REVOKE does not remove them.
+revoke all privileges (id, subject, question, option_a, option_b, option_c, option_d, correct_answer, explanation, difficulty, created_at)
+  on table public.questions from anon, authenticated;
 grant select (id, subject, question, option_a, option_b, option_c, option_d, difficulty, created_at)
   on table public.questions to authenticated;
 
 drop policy if exists "Anyone can view questions" on public.questions;
+drop policy if exists "Admins can insert questions" on public.questions;
+drop policy if exists "Admins can update questions" on public.questions;
+drop policy if exists "Admins can delete questions" on public.questions;
 create policy "Authenticated users can read question prompts"
   on public.questions for select to authenticated using (true);
 
 -- Test results and aggregate stats are read-only to clients. Trusted RPCs own writes.
 revoke all on table public.test_results from anon, authenticated;
+revoke all privileges (id, user_id, score, total, subject, created_at, total_questions, correct_answers)
+  on table public.test_results from anon, authenticated;
 grant select on table public.test_results to authenticated;
 
+drop policy if exists "Users can insert their own results" on public.test_results;
 drop policy if exists "Users can view all test results for leaderboard" on public.test_results;
 drop policy if exists "Users can view their own results" on public.test_results;
 create policy "Users can view their own results"
@@ -65,8 +72,11 @@ create policy "Users can view their own results"
   using (auth.uid() = user_id);
 
 revoke all on table public.user_stats from anon, authenticated;
+revoke all privileges (id, user_id, accuracy, streak, total_tests, created_at, last_active_date, tasks, completed_tasks)
+  on table public.user_stats from anon, authenticated;
 grant select on table public.user_stats to authenticated;
 
+drop policy if exists "Users can insert their own stats" on public.user_stats;
 drop policy if exists "Anyone logged in can read all stats" on public.user_stats;
 drop policy if exists "Users can view their own stats" on public.user_stats;
 create policy "Users can view their own stats"
@@ -74,10 +84,16 @@ create policy "Users can view their own stats"
   using (auth.uid() = user_id);
 
 drop policy if exists "Users can update their own stats" on public.user_stats;
+drop policy if exists "Users can read their own stats" on public.user_stats;
 
 -- Bookmarks remain readable by their owner; mutations go through toggle_bookmark.
 revoke all on table public.bookmarked_questions from anon, authenticated;
+revoke all privileges (id, user_id, question_id, created_at)
+  on table public.bookmarked_questions from anon, authenticated;
 grant select on table public.bookmarked_questions to authenticated;
+drop policy if exists "Users can insert bookmarks" on public.bookmarked_questions;
+drop policy if exists "Users can update bookmarks" on public.bookmarked_questions;
+drop policy if exists "Users can delete bookmarks" on public.bookmarked_questions;
 
 -- ---------------------------------------------------------------------------
 -- Dashboard: safe creation and update of user-owned study tasks
@@ -296,7 +312,7 @@ begin
     raise exception 'Administrator access required';
   end if;
 
-  if p_subject not in (
+  if p_subject is null or p_subject not in (
     'English', 'Basic Mathematics', 'Advanced Mathematics', 'Physics',
     'Computer Science', 'IQ', 'Analytical Reasoning', 'Quantitative Reasoning'
   ) then
@@ -394,7 +410,7 @@ begin
     pg_catalog.hashtextextended('preppath-question-import', 0)
   );
 
-  for v_row in select value from jsonb_array_elements(p_questions) as value
+  for v_row in select elements.value from jsonb_array_elements(p_questions) as elements(value)
   loop
     v_subject := btrim(coalesce(v_row->>'subject', ''));
     v_question := btrim(coalesce(v_row->>'question', ''));
@@ -685,11 +701,11 @@ begin
     raise exception 'Authentication required';
   end if;
 
-  if p_mode not in ('20-questions', '50-questions', 'timed-mode') then
+  if p_mode is null or p_mode not in ('20-questions', '50-questions', 'timed-mode') then
     raise exception 'Invalid test mode';
   end if;
 
-  if p_subject not in (
+  if p_subject is null or p_subject not in (
     'English', 'Basic Mathematics', 'Advanced Mathematics', 'Physics',
     'Computer Science', 'IQ', 'Analytical Reasoning', 'Quantitative Reasoning'
   ) then
@@ -723,8 +739,8 @@ begin
   from public.questions
   where subject = p_subject;
 
-  if v_question_count = 0 then
-    raise exception 'No questions are available for this subject';
+  if v_question_count < v_wanted then
+    raise exception 'Not enough questions are available for this test length';
   end if;
 
   insert into public.secure_test_attempts (user_id, subject, mode, expires_at)
