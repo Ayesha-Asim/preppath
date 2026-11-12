@@ -545,17 +545,17 @@ begin
         'position', i.position,
         'selected', i.answer,
         'correct', case
-          when v_attempt.finished_at is not null or i.answered_at is not null
+          when v_attempt.finished_at is not null
           then i.answer = q.correct_answer
           else null
         end,
         'correct_answer', case
-          when v_attempt.finished_at is not null or i.answered_at is not null
+          when v_attempt.finished_at is not null
           then q.correct_answer
           else null
         end,
         'explanation', case
-          when v_attempt.finished_at is not null or i.answered_at is not null
+          when v_attempt.finished_at is not null
           then q.explanation
           else null
         end
