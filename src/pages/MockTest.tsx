@@ -390,12 +390,9 @@ export default function MockTest() {
 
           .from("questions")
 
-          .select("*", {
-
+          .select("id", {
             count: "exact",
-
             head: true,
-
           })
 
           .eq("subject", subject.title);
