@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { CSSProperties } from "react";
 
@@ -6,7 +6,6 @@ import MainLayout from "./MainLayout";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { supabase } from "../lib/supabase";
-import { getQuestions } from "../lib/questions";
 import { notifyNewAchievements } from "../lib/achievements";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -35,52 +34,7 @@ type TestRunnerProps = {
    Helpers
 ========================================================= */
 
-function shuffleQuestions(
-  questions: Question[],
-  count: number
-): Question[] {
-  return [...questions]
-    .sort(() => Math.random() - 0.5)
-    .slice(0, Math.min(count, questions.length));
-}
-
-/*
- * Converts different possible Supabase answer formats
- * into a number from 0-3.
- *
- * Supports:
- * 0, 1, 2, 3
- * "0", "1", "2", "3"
- * "A", "B", "C", "D"
- */
-function normalizeCorrectAnswer(
-  answer: unknown
-): number {
-  if (typeof answer === "number") {
-    return answer;
-  }
-
-  if (typeof answer === "string") {
-    const value = answer.trim().toUpperCase();
-
-    if (value === "A") return 0;
-    if (value === "B") return 1;
-    if (value === "C") return 2;
-    if (value === "D") return 3;
-
-    const numeric = Number(value);
-
-    if (
-      Number.isInteger(numeric) &&
-      numeric >= 0 &&
-      numeric <= 3
-    ) {
-      return numeric;
-    }
-  }
-
-  return 0;
-}
+// Answer keys are supplied only by the server after an attempt is finalized.
 
 /*
  * Renders AI explanations with real LaTeX support via MathJax.
@@ -138,62 +92,26 @@ function MathExplanation({
   );
 }
 
-type SavedTestAttempt = {
-  subject: string;
-  mode: string;
-  questionIds: string[];
-  index: number;
-  selected: number | null;
-  score: number;
-  userAnswers: (number | null)[];
-  timeLeft: number;
-  savedAt: string;
+type SecureQuestion = {
+  id: string; question: string; option_a: string; option_b: string;
+  option_c: string; option_d: string; position: number;
+  selected: number | null; correct_answer: number | null; explanation: string | null;
 };
-
-function getTestDraftKey(subject: string, mode: string) {
-  return `preppath-test-draft:${subject}:${mode}`;
+type SecureState = {
+  attempt_id: string; subject: string; mode: string; expires_at: string | null;
+  finished: boolean; questions: SecureQuestion[]; score: number | null;
+};
+async function secureRpc<T>(name: string, params: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.rpc(name, params);
+  if (error) throw error;
+  return data as T;
+}
+function convertSecureQuestions(items: SecureQuestion[]): Question[] {
+  return items.map(q => ({id:q.id, question:q.question,
+    options:[q.option_a,q.option_b,q.option_c,q.option_d],
+    answer:q.correct_answer ?? -1, explanation:q.explanation ?? ""}));
 }
 
-function loadTestDraft(
-  subject: string,
-  mode: string
-): SavedTestAttempt | null {
-  try {
-    const raw = window.localStorage.getItem(
-      getTestDraftKey(subject, mode)
-    );
-
-    if (!raw) {
-      return null;
-    }
-
-    const parsed = JSON.parse(raw) as SavedTestAttempt;
-
-    if (
-      parsed.subject !== subject ||
-      parsed.mode !== mode ||
-      !Array.isArray(parsed.questionIds) ||
-      !Array.isArray(parsed.userAnswers)
-    ) {
-      return null;
-    }
-
-    return parsed;
-  } catch (error) {
-    console.error("Could not restore saved test:", error);
-    return null;
-  }
-}
-
-function clearTestDraft(subject: string, mode: string) {
-  try {
-    window.localStorage.removeItem(
-      getTestDraftKey(subject, mode)
-    );
-  } catch (error) {
-    console.error("Could not clear saved test:", error);
-  }
-}
 
 /* =========================================================
    Component
@@ -213,10 +131,7 @@ export default function TestRunner({
   const mode = searchParams.get("mode") || "20-questions";
   const normalizedMode = mode.toLowerCase().trim();
 
-  const savedDraft = useMemo(
-    () => loadTestDraft(subject, normalizedMode),
-    [subject, normalizedMode]
-  );
+  // Attempt state is restored from the server, not browser-controlled score data.
 
   const isTimedMode =
     normalizedMode === "timed-mode" ||
@@ -284,24 +199,13 @@ export default function TestRunner({
   const [dbQuestions, setDbQuestions] =
     useState<Question[]>([]);
 
-  const [index, setIndex] = useState(
-    savedDraft?.index ?? 0
-  );
-
-  const [selected, setSelected] =
-    useState<number | null>(
-      savedDraft?.selected ?? null
-    );
-
-  const [score, setScore] = useState(
-    savedDraft?.score ?? 0
-  );
-
+  const [attemptId, setAttemptId] = useState<string | null>(null);
+  const [index, setIndex] = useState(0);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
-
-  const [userAnswers, setUserAnswers] = useState<
-    (number | null)[]
-  >(savedDraft?.userAnswers ?? []);
+  const [userAnswers, setUserAnswers] = useState<(number | null)[]>([]);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
   const [bookmarked, setBookmarked] =
     useState(false);
@@ -314,211 +218,77 @@ export default function TestRunner({
   const [aiExplanation, setAiExplanation] =
     useState("");
 
+  const [aiReviewExplanations, setAiReviewExplanations] =
+    useState<Record<string, string>>({});
+
+  const [loadingAIReviewKey, setLoadingAIReviewKey] =
+    useState<string | null>(null);
+
   const [
     loadingAIExplanation,
     setLoadingAIExplanation,
   ] = useState(false);
 
-  const [timeLeft, setTimeLeft] =
-    useState(
-      isTimedMode && savedDraft
-        ? savedDraft.timeLeft
-        : initialTime
-    );
+  const [timeLeft, setTimeLeft] = useState(initialTime);
 
   const [resultSaveError, setResultSaveError] =
     useState("");
 
+  const [testLoadError, setTestLoadError] =
+    useState("");
+
   const [restoredNotice, setRestoredNotice] =
-    useState(Boolean(savedDraft));
+    useState(false);
 
   /* =======================================================
-     Load questions
+     Load or resume a server-owned test
   ======================================================= */
-
   useEffect(() => {
     let cancelled = false;
-
     async function loadQuestions() {
       setLoadingQuestions(true);
-
       try {
-        const data = await getQuestions(subject);
-
-        console.log("Subject received:", subject);
-        console.log(
-          "Questions from Supabase:",
-          data
-        );
-
-        if (cancelled) {
-          return;
-        }
-
-        if (!data || data.length === 0) {
-          setDbQuestions([]);
-          return;
-        }
-
-        const converted: Question[] = data
-          .map((q: any) => ({
-            id: q.id,
-            question: q.question,
-            options: [
-              q.option_a,
-              q.option_b,
-              q.option_c,
-              q.option_d,
-            ].filter(
-              (option): option is string =>
-                typeof option === "string"
-            ),
-            answer: normalizeCorrectAnswer(
-              q.correct_answer
-            ),
-            explanation: q.explanation || "",
-          }))
-          .filter(
-            (q: Question) =>
-              q.question &&
-              q.options.length >= 2
-          );
-
-        setDbQuestions(converted);
-      } catch (error) {
-        console.error(
-          "Error loading questions:",
-          error
-        );
-
+        const state = await secureRpc<SecureState>("start_secure_test",
+          {p_subject:subject,p_mode:isTimedMode?"timed-mode":is50Questions?"50-questions":"20-questions"});
+        if (cancelled) return;
+        setAttemptId(state.attempt_id);
+        setExpiresAt(state.expires_at);
+        setDbQuestions(convertSecureQuestions(state.questions));
+        const answers=state.questions.map(q=>q.selected);
+        setUserAnswers(answers);
+        const next=answers.findIndex(answer=>answer===null);
+        setIndex(next===-1?Math.max(0,answers.length-1):next);
+        setSelected(next===-1?null:answers[next]);
+        setRestoredNotice(answers.some(answer=>answer!==null));
+        setFinished(state.finished);
+        setScore(state.score??0);
+      } catch(error) {
+        console.error("Secure test loading failed:",error);
+        const rpcError = error as { code?: string; message?: string };
+        const missingRpc =
+          rpcError.code === "PGRST202" ||
+          rpcError.code === "42883" ||
+          (rpcError.message ?? "").toLowerCase().includes("start_secure_test");
         if (!cancelled) {
-          setDbQuestions([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingQuestions(false);
-        }
-      }
-    }
-
-    loadQuestions();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [subject]);
-
-  /* =======================================================
-     Select questions for this test
-  ======================================================= */
-
-  const testQuestions = useMemo(() => {
-    /*
-     * Restore the exact questions/order from an unfinished
-     * attempt when possible. Otherwise create a fresh test.
-     */
-    if (
-      savedDraft?.questionIds?.length &&
-      dbQuestions.length > 0
-    ) {
-      const questionsById = new Map(
-        dbQuestions
-          .filter((question) => question.id)
-          .map((question) => [
-            question.id as string,
-            question,
-          ])
-      );
-
-      const restoredQuestions =
-        savedDraft.questionIds
-          .map((id) => questionsById.get(id))
-          .filter(
-            (question): question is Question =>
-              Boolean(question)
+          setTestLoadError(
+            missingRpc
+              ? "Secure mock tests are not configured on this V2 database yet. The required database setup must be applied and verified before questions can load."
+              : "We couldn't connect to the secure test service. Please check your connection and try again."
           );
-
-      if (
-        restoredQuestions.length ===
-        savedDraft.questionIds.length
-      ) {
-        return restoredQuestions;
-      }
+        }
+      } finally { if(!cancelled) setLoadingQuestions(false); }
     }
+    if(user?.id) void loadQuestions();
+    return ()=>{cancelled=true};
+  },[subject,isTimedMode,is50Questions,user?.id]);
+  // The signed-in user ID determines when a new server attempt is loaded.
 
-    return shuffleQuestions(
-      dbQuestions,
-      questionLimit
-    );
-  }, [
-    dbQuestions,
-    questionLimit,
-    savedDraft,
-  ]);
+  const testQuestions = dbQuestions;
 
   const current = testQuestions[index];
 
-  /* =======================================================
-     Local autosave / recovery
-  ======================================================= */
-
-  useEffect(() => {
-    if (
-      finished ||
-      loadingQuestions ||
-      testQuestions.length === 0
-    ) {
-      return;
-    }
-
-    const questionIds = testQuestions
-      .map((question) => question.id)
-      .filter((id): id is string => Boolean(id));
-
-    if (questionIds.length !== testQuestions.length) {
-      return;
-    }
-
-    const draft: SavedTestAttempt = {
-      subject,
-      mode: normalizedMode,
-      questionIds,
-      index,
-      selected,
-      score,
-      userAnswers,
-      timeLeft,
-      savedAt: new Date().toISOString(),
-    };
-
-    try {
-      window.localStorage.setItem(
-        getTestDraftKey(subject, normalizedMode),
-        JSON.stringify(draft)
-      );
-    } catch (error) {
-      console.error("Could not autosave test:", error);
-    }
-  }, [
-    subject,
-    normalizedMode,
-    finished,
-    loadingQuestions,
-    testQuestions,
-    index,
-    selected,
-    score,
-    userAnswers,
-    timeLeft,
-  ]);
-
-  useEffect(() => {
-    if (!finished) {
-      return;
-    }
-
-    clearTestDraft(subject, normalizedMode);
-  }, [finished, subject, normalizedMode]);
+  // Answers and question order are stored by the server.
+  // Browser storage is not trusted for scoring or recovery.
 
   const committedAnswers = userAnswers.filter(
     (answer) => answer !== null && answer !== undefined
@@ -537,100 +307,26 @@ export default function TestRunner({
   );
 
   /* =======================================================
-     Timed mode countdown
+     Timed mode uses the server-issued absolute expiry.
   ======================================================= */
-
   useEffect(() => {
-    if (
-      !isTimedMode ||
-      finished ||
-      loadingQuestions ||
-      testQuestions.length === 0
-    ) {
-      return;
-    }
-
-    if (timeLeft <= 0) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      setTimeLeft((previous) => {
-        if (previous <= 1) {
-          window.clearInterval(timer);
-          return 0;
-        }
-
-        return previous - 1;
-      });
-    }, 1000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [
-    isTimedMode,
-    finished,
-    loadingQuestions,
-    testQuestions.length,
-    timeLeft,
-  ]);
-
-  /* =======================================================
-     Finish test automatically when timer reaches zero
-  ======================================================= */
-
-  useEffect(() => {
-    if (
-      !isTimedMode ||
-      loadingQuestions ||
-      finished ||
-      saving ||
-      Boolean(resultSaveError) ||
-      testQuestions.length === 0 ||
-      timeLeft !== 0
-    ) {
-      return;
-    }
-
-    async function finishTimedTest() {
-      setSaving(true);
-
-      try {
-        const saved = await saveResult(score);
-
-        if (saved) {
-          setFinished(true);
-          setResultSaveError("");
-        } else {
-          setResultSaveError(
-            "Your internet connection may be unavailable. Your test progress is safe on this device. Reconnect and retry saving."
-          );
-        }
-      } finally {
-        setSaving(false);
-      }
-    }
-
-    finishTimedTest();
-  }, [
-    timeLeft,
-    isTimedMode,
-    loadingQuestions,
-    finished,
-    saving,
-    resultSaveError,
-    testQuestions.length,
-    score,
-  ]);
+    if (!isTimedMode || !expiresAt || finished || loadingQuestions) return;
+    const tick=()=>setTimeLeft(Math.max(0,Math.ceil((Date.parse(expiresAt)-Date.now())/1000)));
+    tick(); const timer=window.setInterval(tick,1000);
+    return ()=>window.clearInterval(timer);
+  },[isTimedMode,expiresAt,finished,loadingQuestions]);
+  useEffect(()=>{
+    if(isTimedMode && expiresAt && timeLeft===0 && !finished && !saving && attemptId && !resultSaveError)
+      void secureRpc<SecureState>("finalize_secure_test",{p_attempt_id:attemptId})
+        .then(async state=>{setScore(state.score??0);setDbQuestions(convertSecureQuestions(state.questions));setFinished(state.finished);setResultSaveError("");if(state.finished) await refreshAchievementNotifications();})
+        .catch(error=>{console.error("Timed finalization failed:",error);setResultSaveError("Timed test could not be finalized. Please retry.");});
+  },[isTimedMode,expiresAt,timeLeft,finished,saving,attemptId,resultSaveError]);
 
   /* =======================================================
      Check bookmark for current question
   ======================================================= */
 
   useEffect(() => {
-    setBookmarkMessage("");
-
     async function checkBookmark() {
       if (!current?.id) {
         setBookmarked(false);
@@ -653,7 +349,7 @@ export default function TestRunner({
       }
     }
 
-    checkBookmark();
+    void checkBookmark();
   }, [current]);
 
   /* =======================================================
@@ -669,234 +365,68 @@ export default function TestRunner({
             100
         );
 
-  /* =======================================================
-     Save result
-  ======================================================= */
+  async function refreshAchievementNotifications() {
+    if (!user?.id) return;
 
-  async function saveResult(
-    finalScore: number
-  ): Promise<boolean> {
-    let resultSaved = false;
-    if (
-      !user ||
-      testQuestions.length === 0
-    ) {
-      return false;
+    const [{ data: results, error: resultsError }, { data: stats, error: statsError }] =
+      await Promise.all([
+        supabase
+          .from("test_results")
+          .select("subject, score, total_questions, created_at")
+          .eq("user_id", user.id),
+        supabase
+          .from("user_stats")
+          .select("streak")
+          .eq("user_id", user.id)
+          .maybeSingle(),
+      ]);
+
+    if (resultsError || statsError) {
+      console.error("Could not refresh achievement progress:", resultsError || statsError);
+      return;
     }
 
+    await notifyNewAchievements(user.id, results ?? [], Number(stats?.streak ?? 0));
+  }
+
+  async function saveResult(): Promise<boolean> {
+    if(!attemptId) return false;
     try {
-
-      /* ---------------------------------------------------
-         Save test result
-      --------------------------------------------------- */
-
-      const {
-        error: resultError,
-      } = await supabase
-        .from("test_results")
-        .insert({
-          user_id: user.id,
-          subject,
-          score: finalScore,
-          total_questions:
-            testQuestions.length,
-          correct_answers: finalScore,
-          created_at:
-            new Date().toISOString(),
-        });
-
-      if (resultError) {
-        console.error(
-          "Error saving test result:",
-          resultError
-        );
-
-        return false;
+      const state=await secureRpc<SecureState>("finalize_secure_test",{p_attempt_id:attemptId});
+      setScore(state.score??0);
+      setDbQuestions(convertSecureQuestions(state.questions));
+      setFinished(state.finished);
+      if (state.finished) {
+        await refreshAchievementNotifications();
       }
-
-      resultSaved = true;
-
-      /* ---------------------------------------------------
-         Get existing user stats
-      --------------------------------------------------- */
-
-      const {
-        data: stats,
-        error: statsError,
-      } = await supabase
-        .from("user_stats")
-        .select("*")
-        .eq("user_id", user.id)
-        .single();
-
-      if (statsError || !stats) {
-        console.error(
-          "Could not load user stats:",
-          statsError
-        );
-
-        return true;
-      }
-
-      /* ---------------------------------------------------
-         Calculate streak
-      --------------------------------------------------- */
-
-      const now = new Date();
-      const today = [
-        now.getFullYear(),
-        String(now.getMonth() + 1).padStart(2, "0"),
-        String(now.getDate()).padStart(2, "0"),
-      ].join("-");
-
-      let streak = 1;
-
-      if (stats.last_active_date) {
-        const previousDate =
-          new Date(
-            `${stats.last_active_date}T00:00:00`
-          );
-
-        const currentDate =
-          new Date(
-            `${today}T00:00:00`
-          );
-
-        const difference =
-          Math.round(
-            (currentDate.getTime() -
-              previousDate.getTime()) /
-              (1000 * 60 * 60 * 24)
-          );
-
-        if (difference === 0) {
-          /*
-           * Already active today.
-           */
-          streak = stats.streak || 1;
-        } else if (difference === 1) {
-          /*
-           * Active yesterday, so increase streak.
-           */
-          streak =
-            (stats.streak || 0) + 1;
-        } else {
-          /*
-           * Streak broken.
-           */
-          streak = 1;
-        }
-      }
-
-      /* ---------------------------------------------------
-      Calculate stats from actual test results
-      --------------------------------------------------- */
-
-      const {
-        data: allResults,
-        error: resultsError,
-      } = await supabase
-        .from("test_results")
-        .select("subject, score, total_questions, created_at")
-        .eq("user_id", user.id);
-
-      if (resultsError) {
-        console.error(
-          "Could not calculate test statistics:",
-          resultsError
-        );
-
-        return true;
-      }
-
-      const totalTests = allResults?.length ?? 0;
-
-      const totalCorrect =
-        allResults?.reduce(
-          (sum, result) =>
-            sum + (result.score || 0),
-          0
-        ) ?? 0;
-
-      const totalQuestions =
-        allResults?.reduce(
-          (sum, result) =>
-            sum + (result.total_questions || 0),
-          0
-        ) ?? 0;
-
-      const newAccuracy =
-        totalQuestions > 0
-          ? Math.round(
-              (totalCorrect / totalQuestions) * 100
-            )
-          : 0;
-
-      /* ---------------------------------------------------
-         Update stats
-      --------------------------------------------------- */
-
-      const {
-        error: updateError,
-      } = await supabase
-        .from("user_stats")
-        .update({
-          total_tests: totalTests,
-          accuracy: newAccuracy,
-          streak,
-          last_active_date: today,
-        })
-        .eq("user_id", user.id);
-
-      if (updateError) {
-        console.error(
-          "Error updating user stats:",
-          updateError
-        );
-      }
-
-      try {
-        await notifyNewAchievements(
-          user.id,
-          allResults || [],
-          streak
-        );
-      } catch (achievementError) {
-        console.error(
-          "Achievement check failed:",
-          achievementError
-        );
-      }
-
-      return true;
-    } catch (error) {
-      console.error(
-        "Unexpected error saving result:",
-        error
-      );
-
-      return resultSaved;
-    }
+      return state.finished;
+    } catch(error){console.error("Secure finalize failed:",error);return false;}
   }
 
   /* =======================================================
      AI explanation
   ======================================================= */
 
-  async function getAIExplanation() {
-  if (!current || selected === null) {
+  async function getAIExplanation(targetQuestion: Question | undefined = current, targetAnswer: number | null = selected, reviewKey?: string) {
+  const updateExplanation = (value: string) => {
+    if (reviewKey !== undefined) setAiReviewExplanations((values) => ({ ...values, [reviewKey]: value }));
+    else setAiExplanation(value);
+  };
+  if (!targetQuestion || targetAnswer === null || targetQuestion.answer < 0) {
+    updateExplanation("Answer explanations are available after you finish the test.");
     return;
   }
 
-  setLoadingAIExplanation(true);
-  setAiExplanation("");
+  if (reviewKey !== undefined) setLoadingAIReviewKey(reviewKey);
+  else setLoadingAIExplanation(true);
+  updateExplanation("");
 
   try {
     const selectedAnswer =
-      current.options[selected];
+      targetQuestion.options[targetAnswer];
 
     const correctAnswer =
-      current.options[current.answer];
+      targetQuestion.answer >= 0 ? targetQuestion.options[targetQuestion.answer] : "Not available before finishing";
 
     // Get the current authenticated session.
     const {
@@ -904,7 +434,7 @@ export default function TestRunner({
     } = await supabase.auth.getSession();
 
     if (!session?.access_token) {
-      setAiExplanation(
+      updateExplanation(
         "Please sign in again to use AI explanations."
       );
       return;
@@ -921,7 +451,7 @@ export default function TestRunner({
         "Missing Supabase environment variables."
       );
 
-      setAiExplanation(
+      updateExplanation(
         "AI explanations are temporarily unavailable."
       );
       return;
@@ -944,12 +474,12 @@ export default function TestRunner({
 
         body: JSON.stringify({
           subject,
-          question: current.question,
-          options: current.options,
+          question: targetQuestion.question,
+          options: targetQuestion.options,
           selectedAnswer,
           correctAnswer,
           existingExplanation:
-            current.explanation,
+            targetQuestion.explanation,
         }),
       }
     );
@@ -1046,7 +576,7 @@ export default function TestRunner({
 
             // Update React immediately as
             // each piece of text arrives.
-            setAiExplanation(
+            updateExplanation(
               fullExplanation
             );
           }
@@ -1085,7 +615,7 @@ export default function TestRunner({
           ) {
             fullExplanation += content;
 
-            setAiExplanation(
+            updateExplanation(
               fullExplanation
             );
           }
@@ -1096,7 +626,7 @@ export default function TestRunner({
     }
 
     if (!fullExplanation.trim()) {
-      setAiExplanation(
+      updateExplanation(
         "No explanation was generated."
       );
     }
@@ -1106,13 +636,14 @@ export default function TestRunner({
       error
     );
 
-    setAiExplanation(
+    updateExplanation(
       error instanceof Error
         ? error.message
         : "Something went wrong while generating the AI explanation."
     );
   } finally {
-    setLoadingAIExplanation(false);
+    if (reviewKey !== undefined) setLoadingAIReviewKey(null);
+    else setLoadingAIExplanation(false);
   }
 }
 
@@ -1121,69 +652,25 @@ export default function TestRunner({
   ======================================================= */
 
   async function submitAnswer() {
-    if (
-      selected === null ||
-      saving ||
-      !current
-    ) {
-      return;
-    }
-
-    const updatedAnswers = [
-      ...userAnswers,
-    ];
-
-    updatedAnswers[index] = selected;
-
-    setUserAnswers(updatedAnswers);
-
-    const isCorrect =
-      selected === current.answer;
-
-    const updatedScore = isCorrect
-      ? score + 1
-      : score;
-
-    /* ---------------------------------------------------
-       More questions remaining
-    --------------------------------------------------- */
-
-    if (
-      index <
-      testQuestions.length - 1
-    ) {
-      setScore(updatedScore);
-      setIndex(index + 1);
-      setSelected(null);
-      setAiExplanation("");
-      setResultSaveError("");
-
-      return;
-    }
-
-    /* ---------------------------------------------------
-       Last question
-    --------------------------------------------------- */
-
+    if(selected===null || saving || !current || !attemptId) return;
     setSaving(true);
-
     try {
-      const saved = await saveResult(updatedScore);
-
-      setScore(updatedScore);
-
-      if (saved) {
-        setResultSaveError("");
-        setFinished(true);
-      } else {
-        setResultSaveError(
-          "Your result could not be saved because the connection appears to be unavailable. Your progress is safe on this device. Reconnect and press Finish Test again."
-        );
+      await secureRpc("submit_secure_test_answer",
+        {p_attempt_id:attemptId,p_position:index,p_answer:selected});
+      const answers=[...userAnswers]; answers[index]=selected;
+      setUserAnswers(answers);
+      setResultSaveError("");
+      if(index<testQuestions.length-1){
+        setIndex(index+1);setSelected(answers[index+1]??null);setAiExplanation("");
+      }else{
+        const saved=await saveResult();
+        if(!saved) setResultSaveError("Your answer is saved on the server. Retry finishing the test.");
       }
-    } finally {
-      setSaving(false);
-    }
+    }catch(error){console.error("Secure answer failed:",error);
+      setResultSaveError("Answer could not be saved. Check your connection and retry.");
+    }finally{setSaving(false);}
   }
+
 
   /* =======================================================
      Bookmark
@@ -1219,9 +706,26 @@ export default function TestRunner({
      Restart
   ======================================================= */
 
-  function restartTest() {
-    clearTestDraft(subject, normalizedMode);
-    window.location.reload();
+  async function restartTest() {
+    setSaving(true);
+    try {
+      const state=await secureRpc<SecureState>("start_secure_test",
+        {p_subject:subject,p_mode:isTimedMode?"timed-mode":is50Questions?"50-questions":"20-questions"});
+      setAttemptId(state.attempt_id);
+      setExpiresAt(state.expires_at);
+      setDbQuestions(convertSecureQuestions(state.questions));
+      const answers=state.questions.map(q=>q.selected);
+      setUserAnswers(answers);
+      setIndex(Math.max(0,answers.findIndex(answer=>answer===null)));
+      setSelected(null);
+      setScore(state.score??0);
+      setFinished(state.finished);
+      setAiExplanation("");
+      setResultSaveError("");
+      setRestoredNotice(false);
+    }catch(error){console.error("Retake failed:",error);
+      setResultSaveError("Unable to start a new test. Please retry.");
+    }finally{setSaving(false);}
   }
 
   async function retrySavingResult() {
@@ -1232,7 +736,7 @@ export default function TestRunner({
     setSaving(true);
 
     try {
-      const saved = await saveResult(score);
+      const saved = await saveResult();
 
       if (saved) {
         setResultSaveError("");
@@ -1328,6 +832,54 @@ export default function TestRunner({
                 }
               />
             </div>
+          </div>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  /* =======================================================
+     Test service unavailable
+  ======================================================= */
+
+  if (testLoadError) {
+    return (
+      <MainLayout>
+        <div
+          className="testrunner-page"
+          style={{
+            ...styles.page,
+            background: colors.page,
+            color: colors.text,
+          }}
+        >
+          <div
+            role="alert"
+            style={{
+              ...styles.emptyCard,
+              background: colors.card,
+              border: `1px solid ${colors.border}`,
+            }}
+          >
+            <div style={{ ...styles.emptyIcon, background: colors.purpleSoft }}>⚙️</div>
+            <h2 style={{ color: colors.text, margin: 0 }}>Test setup unavailable</h2>
+            <p style={{ color: colors.muted, marginTop: 8 }}>{testLoadError}</p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              style={{
+                marginTop: 12,
+                padding: "11px 18px",
+                border: 0,
+                borderRadius: 10,
+                background: colors.purple,
+                color: "#FFFFFF",
+                fontWeight: 800,
+                cursor: "pointer",
+              }}
+            >
+              Retry
+            </button>
           </div>
         </div>
       </MainLayout>
@@ -1819,6 +1371,33 @@ export default function TestRunner({
                             </div>
                           )}
                         </div>
+
+                        {userAnswer !== null && userAnswer !== undefined && (
+                          <div style={{ marginTop: 12 }}>
+                            <button
+                              type="button"
+                              onClick={() => void getAIExplanation(q, userAnswer, String(i))}
+                              disabled={loadingAIReviewKey === String(i)}
+                              style={{
+                                border: `1px solid ${colors.purple}`,
+                                borderRadius: 10,
+                                padding: "9px 12px",
+                                background: colors.purpleSoft,
+                                color: colors.purple,
+                                fontWeight: 800,
+                                cursor: loadingAIReviewKey === String(i) ? "wait" : "pointer",
+                              }}
+                            >
+                              {loadingAIReviewKey === String(i) ? "Generating..." : "Explain with AI"}
+                            </button>
+                            {aiReviewExplanations[String(i)] && (
+                              <div style={{ marginTop: 12, padding: 14, borderRadius: 12, background: colors.card, border: `1px solid ${colors.border}` }}>
+                                <strong style={{ color: colors.purple }}>AI Explanation</strong>
+                                <MathExplanation text={aiReviewExplanations[String(i)]} color={colors.text} />
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {q.explanation && (
                           <div
@@ -2468,9 +2047,9 @@ export default function TestRunner({
 
                 <button
                   type="button"
-                  onClick={getAIExplanation}
+                  onClick={() => void getAIExplanation()}
                   disabled={
-                    selected === null ||
+                    selected === null || current.answer < 0 ||
                     loadingAIExplanation ||
                     saving
                   }
@@ -2478,7 +2057,7 @@ export default function TestRunner({
                       ...styles.aiExplainBtn,
 
                       opacity:
-                        selected === null ||
+                        selected === null || current.answer < 0 ||
                         loadingAIExplanation ||
                         saving
                         ? 0.5

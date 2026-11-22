@@ -80,19 +80,19 @@ export default function AdminDashboard() {
     ] = await Promise.all([
       supabase
         .from("profiles")
-        .select("*", {
-          count: "exact",
-          head: true,
-        }),
+        .select("id", {
+            count: "exact",
+            head: true,
+          }),
 
       supabase.rpc("get_admin_total_tests"),
 
       supabase
         .from("questions")
-        .select("*", {
-          count: "exact",
-          head: true,
-        }),
+        .select("id", {
+            count: "exact",
+            head: true,
+          }),
     ]);
 
     if (usersResult.error) {

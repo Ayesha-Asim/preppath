@@ -81,28 +81,22 @@ export default function Dashboard() {
     if (!user) return;
 
     const fetchAll = async () => {
-      let { data: statsData } = await supabase
+      const { error: ensureStatsError } = await supabase.rpc(
+        "ensure_my_user_stats"
+      );
+
+      if (ensureStatsError) {
+        console.error("Could not initialize study stats:", ensureStatsError);
+      }
+
+      const { data: statsData, error: statsError } = await supabase
         .from("user_stats")
         .select("*")
         .eq("user_id", user.id)
         .maybeSingle();
 
-      if (!statsData) {
-        const { data: insertedStats } = await supabase
-          .from("user_stats")
-          .insert({
-            user_id: user.id,
-            accuracy: 0,
-            streak: 0,
-            total_tests: 0,
-            tasks: [],
-            completed_tasks: [],
-            created_at: new Date().toISOString(),
-          })
-          .select("*")
-          .single();
-
-        statsData = insertedStats;
+      if (statsError) {
+        console.error("Could not load study stats:", statsError);
       }
 
       if (statsData) {
@@ -171,10 +165,10 @@ export default function Dashboard() {
 
     const updatedTasks = [...tasks, newTask.trim()];
 
-    const { error } = await supabase
-      .from("user_stats")
-      .update({ tasks: updatedTasks })
-      .eq("user_id", user.id);
+    const { error } = await supabase.rpc("update_my_study_tasks", {
+      p_tasks: updatedTasks,
+      p_completed_tasks: completed,
+    });
 
     if (error) {
       console.error("Error saving study task:", error);
@@ -193,10 +187,10 @@ export default function Dashboard() {
       ? completed.filter((i) => i !== index)
       : [...completed, index];
 
-    const { error } = await supabase
-      .from("user_stats")
-      .update({ completed_tasks: updatedCompleted })
-      .eq("user_id", user.id);
+    const { error } = await supabase.rpc("update_my_study_tasks", {
+      p_tasks: tasks,
+      p_completed_tasks: updatedCompleted,
+    });
 
     if (error) {
       console.error("Error updating study task:", error);
@@ -215,13 +209,10 @@ export default function Dashboard() {
       .filter((i) => i !== index)
       .map((i) => (i > index ? i - 1 : i));
 
-    const { error } = await supabase
-      .from("user_stats")
-      .update({
-        tasks: updatedTasks,
-        completed_tasks: updatedCompleted,
-      })
-      .eq("user_id", user.id);
+    const { error } = await supabase.rpc("update_my_study_tasks", {
+      p_tasks: updatedTasks,
+      p_completed_tasks: updatedCompleted,
+    });
 
     if (error) {
       console.error("Error deleting study task:", error);

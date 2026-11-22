@@ -56,18 +56,17 @@ export default function AddQuestion() {
 
     setSaving(true);
 
-    const { error } = await supabase
-      .from("questions")
-      .insert({
-        subject,
-        question,
-        option_a: optionA,
-        option_b: optionB,
-        option_c: optionC,
-        option_d: optionD,
-        correct_answer: correct,
-        explanation,
-      });
+    const { error } = await supabase.rpc("admin_insert_question", {
+      p_subject: subject,
+      p_question: question,
+      p_option_a: optionA,
+      p_option_b: optionB,
+      p_option_c: optionC,
+      p_option_d: optionD,
+      p_correct_answer: correct,
+      p_explanation: explanation,
+      p_difficulty: "Medium",
+    });
 
     setSaving(false);
 

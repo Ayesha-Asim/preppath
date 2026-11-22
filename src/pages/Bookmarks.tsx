@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import MainLayout from "../components/MainLayout";
 import { useAuth } from "../context/AuthContext";
@@ -12,12 +12,6 @@ type Bookmark = {
     id: string;
     subject: string;
     question: string;
-    option_a: string;
-    option_b: string;
-    option_c: string;
-    option_d: string;
-    correct_answer: number;
-    explanation: string;
   };
 };
 
@@ -48,15 +42,7 @@ export default function Bookmarks() {
 
   const bookmarkCount = bookmarks.length;
 
-  useEffect(() => {
-    if (profileLoading) {
-      return;
-    }
-
-    loadBookmarks();
-  }, [user, profileLoading]);
-
-  async function loadBookmarks() {
+  const loadBookmarks = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
 
@@ -73,13 +59,7 @@ export default function Bookmarks() {
           question:questions!bookmarked_questions_question_id_fkey (
             id,
             subject,
-            question,
-            option_a,
-            option_b,
-            option_c,
-            option_d,
-            correct_answer,
-            explanation
+            question
           )
         `)
         .eq("user_id", user.id);
@@ -109,7 +89,13 @@ export default function Bookmarks() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [user]);
+
+  useEffect(() => {
+    if (!profileLoading) {
+      void Promise.resolve().then(() => loadBookmarks());
+    }
+  }, [loadBookmarks, profileLoading]);
 
   async function removeBookmark(bookmark: Bookmark) {
     setRemovingId(bookmark.id);
