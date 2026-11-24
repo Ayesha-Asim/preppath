@@ -1,9 +1,9 @@
-<img width="1599" height="763" alt="image" src="https://github.com/user-attachments/assets/999be065-d66c-4a89-984e-7a4e1a1772f1" />
-
 ## PrepPath
 PrepPath is a website which helps Pakistani students prepare for their university entry tests, It is made mainly for computer science/engineering students. 
 As the entry tests in Pakistan are quite hard, and many students struggle to find resources for their respective universities and practice and improve their weak points, so I decided to create PrepPath to help all the students.
 The website includes Mock Tests with 2500+ questions for all the subjects. It includes AI Bot to help you with your study. It shows universities and their respective tests and also tells which university is suitable for you based on your budget, location, etc. Moreover, it includes a leaderboard to compare your results with other students. 
+
+<img width="1599" height="763" alt="image" src="https://github.com/user-attachments/assets/999be065-d66c-4a89-984e-7a4e1a1772f1" />
 
 ## Features
 1. **Dashboard**: It shows the user's analytics, weak subjects, past tests, and goals.
